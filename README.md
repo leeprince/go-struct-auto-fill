@@ -42,6 +42,21 @@ npm run compile
 vsce package
 ```
 
+4.1 发布到 vscode 的 Marketplace.
+参考：https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publishing-extensions
+
+认证需要<publisher id>
+```bash
+vsce login <publisher id>
+```
+
+命令发布
+```bash
+vsce publish
+```
+
+> 如果命令发布失败，还可以通过**手动上传**，详情参考官方文档。
+
 5. **安装插件**：
    - 打开 Visual Studio Code。
    - 进入扩展面板（Ctrl+Shift+X）。
@@ -149,11 +164,11 @@ vsce package
 
 ## 反馈与贡献
 
-如果你在使用过程中遇到任何问题，或者有改进建议，欢迎在 [GitHub Issues](https://github.com/your-repo/go-struct-auto-fill/issues) 中提交问题。
+如果你在使用过程中遇到任何问题，或者有改进建议，欢迎在 [GitHub Issues](https://github.com/leeprince/go-struct-auto-fill.git) 中提交问题。
 
 如果你有兴趣贡献代码，请 fork 仓库并提交 Pull Request。
 
-个人微信公众号《皇子谈技术》
+也可以通过关注公众号《皇子谈技术》，联系到我。
 
 ## License
 
