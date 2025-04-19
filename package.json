@@ -37,7 +37,7 @@
     "lint": "eslint src --ext ts"
   },
   "keywords": [],
-  "author": "",
+  "author": "leeprince",
   "license": "ISC",
   "devDependencies": {
     "@types/vscode": "^1.60.0",
@@ -47,5 +47,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/leeprince/go-struct-auto-fill.git"
-  }
+  },
+  "publisher": "leeprince"
 }
