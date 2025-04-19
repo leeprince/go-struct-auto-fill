@@ -2,7 +2,7 @@
   "name": "go-struct-auto-fill",
   "displayName": "Go Struct Auto Fill",
   "description": "Automatically fill Go struct fields with default values",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -17,14 +17,14 @@
     "commands": [
       {
         "command": "go-struct-auto-fill.fillStruct",
-        "title": "Fill Go Struct Fields"
+        "title": "Go Struct Auto Fill: Fill Struct Fields"
       }
     ],
     "keybindings": [
       {
         "command": "go-struct-auto-fill.fillStruct",
-        "key": "ctrl+shift+t",
-        "mac": "cmd+shift+t",
+        "key": "alt+enter",
+        "mac": "alt+enter",
         "when": "editorLangId == go"
       }
     ]

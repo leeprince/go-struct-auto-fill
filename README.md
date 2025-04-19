@@ -74,9 +74,8 @@ vsce publish
 1. 打开一个 Go 文件。
 2. 将光标放在结构体初始化的大括号 `{` 内。
 3. 触发自动填充命令：
-   - 使用快捷键（默认未设置，可在命令面板中设置）。
-   - 右键点击并选择 `Fill Struct Fields`。
-   - 在命令面板（Ctrl+Shift+P）中搜索并选择 `Go Struct Auto Fill: Fill Struct Fields`。
+   - 使用快捷键（默认mac/windown:alt+enter，可在命令面板中自定义设置：go-struct-auto-fill.fillStruct）。
+   - 或者在命令面板（Ctrl+Shift+P）中搜索并选择 `Go Struct Auto Fill: Fill Struct Fields`。
 
 ## 技术方案
 
