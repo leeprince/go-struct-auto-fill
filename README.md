@@ -1,46 +1,67 @@
 # Go Struct Auto Fill
 
-一个 VSCode 插件，用于自动填充 Go 结构体的字段。
+## 简介
+
+Go Struct Auto Fill 是一个 Visual Studio Code 插件，用于自动填充 Go 语言结构体的字段。它可以帮助开发者在初始化结构体时，快速生成并填充所有未初始化的字段，减少手动输入的工作量。
 
 ## 功能
 
-- 自动识别 Go 结构体初始化语句
-- 自动填充结构体的所有字段
-- 为每个字段生成合适的默认值
-- 支持指针类型字段（自动设置为 `nil`）
-- 只填充第一层结构体字段，不处理嵌套字段
-- 保持字段顺序与结构体定义顺序一致
-- 智能处理换行符，保持代码格式整洁
-- 支持部分字段已存在的情况，不会重复填充
+- **自动填充结构体字段**：根据结构体定义，自动生成并填充未初始化的字段。
+- **支持嵌套结构体**：能够正确处理嵌套结构体，并填充其字段。
+- **智能字段检查**：确保只在当前结构体的范围内检查字段是否已存在，避免跨结构体的错误判断。
+- **详细的日志输出**：提供详细的日志信息，帮助开发者诊断问题。
 
-## 使用方法
+## 最近更新
 
-1. 在 VSCode 中安装插件
-2. 在 Go 文件中，将光标放在结构体初始化的大括号内
-3. 使用快捷键 `Cmd+Shift+P`（Mac）或 `Ctrl+Shift+P`（Windows/Linux）
-4. 输入 `Go Struct Auto Fill` 或使用快捷键 `Cmd+Shift+F`（Mac）或 `Ctrl+Shift+F`（Windows/Linux）
+- **优化结构体名称提取逻辑**：优先匹配光标所在行及其周围的代码，以正确识别结构体类型。
+- **改进字段存在性检查逻辑**：确保只在当前结构体的范围内进行检查，避免跨结构体的错误判断。
+- **增强日志输出**：在字段检查和处理过程中，提供更详细的日志信息。
 
-例如，当你有如下代码：
+## 安装
 
-```go
-a := ListNode{
-    // 将光标放在这里
-}
+### 从源码安装
+
+1. **克隆仓库**：
+```bash
+git clone https://github.com/leeprince/go-struct-auto-fill.git
+cd go-struct-auto-fill
 ```
 
-使用快捷键后，会自动填充为：
-
-```go
-a := ListNode{
-    Val:   0,
-    Next:  nil,
-    Next1: ListNode1{
-        Val:  0,
-        Next: nil,
-        Name: "",
-    },
-}
+2. **安装依赖**：
+```bash
+npm install
 ```
+
+3. **编译插件**：
+```bash
+npm run compile
+```
+
+4. **打包插件**：
+```bash
+vsce package
+```
+
+5. **安装插件**：
+   - 打开 Visual Studio Code。
+   - 进入扩展面板（Ctrl+Shift+X）。
+   - 点击右上角的 `...` 按钮，选择 `从 VSIX 安装...`。
+   - 选择生成的 `.vsix` 文件进行安装。
+
+### 从 Marketplace 安装
+
+1. 打开 Visual Studio Code。
+2. 进入扩展面板（Ctrl+Shift+X）。
+3. 搜索 `Go Struct Auto Fill` 并点击安装。
+
+## 使用
+
+1. 打开一个 Go 文件。
+2. 将光标放在结构体初始化的大括号 `{` 内。
+3. 触发自动填充命令：
+   - 使用快捷键（默认未设置，可在命令面板中设置）。
+   - 右键点击并选择 `Fill Struct Fields`。
+   - 在命令面板（Ctrl+Shift+P）中搜索并选择 `Go Struct Auto Fill: Fill Struct Fields`。
 
 ## 技术方案
 
@@ -125,21 +146,15 @@ a := ListNode{
    - 保持代码风格一致性
    - 优化部分字段已存在的情况
 
-## 未来计划
 
-1. 支持更多 Go 语言特性
-   - 支持接口类型
-   - 支持泛型
-   - 支持自定义标签
+## 反馈与贡献
 
-2. 增强用户体验
-   - 添加配置选项
-   - 支持自定义默认值
-   - 添加更多快捷键
-   - 支持自定义字段顺序
+如果你在使用过程中遇到任何问题，或者有改进建议，欢迎在 [GitHub Issues](https://github.com/your-repo/go-struct-auto-fill/issues) 中提交问题。
 
-3. 性能优化
-   - 优化字段获取逻辑
-   - 减少不必要的 API 调用
-   - 提高响应速度
-   - 优化代码格式化性能 
+如果你有兴趣贡献代码，请 fork 仓库并提交 Pull Request。
+
+个人微信公众号《皇子谈技术》
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

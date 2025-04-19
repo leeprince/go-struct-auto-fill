@@ -1,9 +1,6 @@
-import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import * as os from 'os';
+import * as vscode from 'vscode';
 
 const execAsync = promisify(exec);
 
@@ -92,14 +89,6 @@ export function activate(context: vscode.ExtensionContext) {
         const line = document.lineAt(position.line);
         const text = line.text;
 
-        // 获取当前行之前的所有文本
-        const textBeforeCursor = document.getText(
-            new vscode.Range(
-                new vscode.Position(0, 0),
-                position
-            )
-        );
-
         outputChannel.appendLine(`当前行文本: ${text}`);
         outputChannel.appendLine(`光标位置: ${position.line}:${position.character}`);
 
@@ -114,7 +103,7 @@ export function activate(context: vscode.ExtensionContext) {
         let isNestedStruct = false;
 
         // 首先，尝试从当前行和周围行判断我们是否在嵌套结构体内部
-        // 这个逻辑需要查找像 "Next1: ListNode1{" 这样的模式
+        // 这个逻辑需要查找像 "Next: ListNode{" 这样的模式
         const currentLineText = text.trim();
 
         // 检查当前行是否包含某个字段的赋值（如 Name: ""）
@@ -124,7 +113,7 @@ export function activate(context: vscode.ExtensionContext) {
         if (fieldAssignmentMatch) {
             outputChannel.appendLine(`检测到字段赋值: ${fieldAssignmentMatch[1]}: ${fieldAssignmentMatch[2]}`);
 
-            // 向上查找找到包含结构体类型的行，如 "Next1: ListNode1{"
+            // 向上查找找到包含结构体类型的行，如 "Next: ListNode{"
             let searchLine = position.line - 1;
             while (searchLine >= 0) {
                 const lineText = document.lineAt(searchLine).text;
@@ -135,7 +124,7 @@ export function activate(context: vscode.ExtensionContext) {
                 const nestedMatch = lineText.match(nestedStructRegex);
 
                 if (nestedMatch) {
-                    structName = nestedMatch[2]; // 捕获结构体名称，如 "ListNode1"
+                    structName = nestedMatch[2]; // 捕获结构体名称，如 "ListNode"
                     isNestedStruct = true;
                     outputChannel.appendLine(`找到嵌套结构体声明: ${nestedMatch[1]}: ${structName}{`);
                     break;
@@ -240,218 +229,39 @@ export function activate(context: vscode.ExtensionContext) {
             outputChannel.appendLine(`补全项: ${JSON.stringify(completionItems, null, 2)}`);
 
             if (!completionItems || !completionItems.items || !Array.isArray(completionItems.items) || completionItems.items.length === 0) {
-                outputChannel.appendLine('未获取到有效的补全项，尝试通过结构体定义获取字段...');
-
-                // 尝试使用工作区符号查找结构体定义
-                try {
-                    const workspaceSymbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
-                        'vscode.executeWorkspaceSymbolProvider',
-                        structName
-                    );
-
-                    outputChannel.appendLine(`工作区符号查询结果: ${JSON.stringify(workspaceSymbols, null, 2)}`);
-
-                    if (workspaceSymbols && workspaceSymbols.length > 0) {
-                        outputChannel.appendLine(`找到工作区符号数量: ${workspaceSymbols.length}`);
-
-                        // 寻找匹配的结构体定义
-                        for (const symbol of workspaceSymbols) {
-                            if (symbol.name === structName && symbol.kind === vscode.SymbolKind.Struct) {
-                                outputChannel.appendLine(`找到结构体定义: ${symbol.name}`);
-
-                                // 获取包含结构体定义的文档
-                                const structDoc = await vscode.workspace.openTextDocument(symbol.location.uri);
-
-                                // 获取结构体定义的位置
-                                const definitionPos = symbol.location.range.start;
-
-                                // 在结构体定义位置获取补全项
-                                try {
-                                    completionItems = await vscode.commands.executeCommand<vscode.CompletionList>(
-                                        'vscode.executeCompletionItemProvider',
-                                        structDoc.uri,
-                                        definitionPos
-                                    );
-
-                                    if (completionItems && completionItems.items && completionItems.items.length > 0) {
-                                        outputChannel.appendLine(`在结构体定义处获取到补全项: ${completionItems.items.length} 项`);
-                                        break;
-                                    }
-                                } catch (err) {
-                                    outputChannel.appendLine(`在结构体定义处获取补全项时出错: ${err}`);
-                                }
-                            }
-                        }
-                    }
-                } catch (err) {
-                    outputChannel.appendLine(`查询工作区符号时出错: ${err}`);
-                }
-            }
-
-            if (!completionItems || !completionItems.items || !Array.isArray(completionItems.items)) {
-                // 如果仍然无法获取补全项，尝试直接解析源代码
-                outputChannel.appendLine('无法通过正常渠道获取结构体字段，尝试直接解析源代码...');
-
-                // 获取所有Go文件
-                const goFiles = await vscode.workspace.findFiles('**/*.go');
-
-                for (const file of goFiles) {
-                    const fileDoc = await vscode.workspace.openTextDocument(file);
-                    const fileText = fileDoc.getText();
-
-                    // 查找结构体定义
-                    const structRegex = new RegExp(`type\\s+${structName}\\s+struct\\s*{([^}]*)}`, 'g');
-                    const match = structRegex.exec(fileText);
-
-                    if (match) {
-                        outputChannel.appendLine(`在文件 ${file.fsPath} 中找到结构体定义`);
-
-                        // 提取字段
-                        const fieldsContent = match[1];
-                        outputChannel.appendLine(`提取的字段内容: ${fieldsContent}`);
-
-                        // 解析字段
-                        const fieldRegex = /(\w+)\s+([^\n;]+)/g;
-                        let fieldMatch;
-
-                        while ((fieldMatch = fieldRegex.exec(fieldsContent)) !== null) {
-                            const name = fieldMatch[1];
-                            const type = fieldMatch[2].split('//')[0].trim();
-
-                            outputChannel.appendLine(`找到字段: ${name}: ${type}`);
-
-                            // 创建一个假的补全项
-                            if (!completionItems) {
-                                completionItems = { items: [] };
-                            } else if (!completionItems.items) {
-                                completionItems.items = [];
-                            }
-
-                            completionItems.items.push({
-                                label: name,
-                                kind: vscode.CompletionItemKind.Field,
-                                detail: type
-                            });
-                        }
-
-                        break;
-                    }
-                }
-            }
-
-            if (!completionItems || !completionItems.items || !Array.isArray(completionItems.items)) {
                 outputChannel.appendLine('未获取到有效的补全项');
                 vscode.window.showErrorMessage('无法获取结构体信息，请确保 Go 插件已正确安装并运行');
                 return;
             }
 
-            // 从补全项中提取结构体字段
+            // 直接使用 gopls 的 API 获取的 completionItems
             const fields: GoField[] = [];
-            const processedFields = new Set<string>(); // 用于跟踪已处理的字段，避免重复
-
             for (const item of completionItems.items) {
                 outputChannel.appendLine(`处理补全项: ${JSON.stringify(item, null, 2)}`);
-                if (item.kind === vscode.CompletionItemKind.Field) {
-                    const fieldName = typeof item.label === 'string' ? item.label : item.label.label;
-
-                    // 跳过已处理的字段
-                    if (processedFields.has(fieldName)) {
-                        outputChannel.appendLine(`跳过重复字段: ${fieldName}`);
-                        continue;
-                    }
-
-                    // 跳过嵌套字段（包含点的字段名）
-                    if (fieldName.includes('.')) {
-                        outputChannel.appendLine(`跳过嵌套字段: ${fieldName}`);
-                        continue;
-                    }
-
-                    const fieldType = item.detail || '';
-                    outputChannel.appendLine(`找到字段: ${JSON.stringify({ name: fieldName, type: fieldType }, null, 2)}`);
-
-                    // 检查字段是否已存在于当前结构体中
-                    let existingText = '';
-                    if (isNestedStruct) {
-                        // 获取嵌套结构体的开始和结束位置
-                        let structStartLine = -1;
-                        let structEndLine = -1;
-
-                        // 向上查找结构体开始位置
-                        let searchLine = position.line;
-                        while (searchLine >= 0) {
-                            const lineText = document.lineAt(searchLine).text;
-                            if (lineText.includes(`${structName}{`) || lineText.includes(`${structName} {`)) {
-                                structStartLine = searchLine;
-                                break;
-                            }
-                            // 如果遇到上一级结构体，停止搜索
-                            if (searchLine !== position.line && (lineText.includes(':=') || lineText.includes('func '))) {
-                                break;
-                            }
-                            searchLine--;
-                        }
-
-                        // 向下查找结构体结束位置
-                        searchLine = position.line;
-                        let braceCount = 0;
-                        let foundStart = false;
-
-                        while (searchLine < document.lineCount) {
-                            const lineText = document.lineAt(searchLine).text;
-
-                            // 计算大括号数量
-                            for (const char of lineText) {
-                                if (char === '{') {
-                                    if (!foundStart && searchLine >= structStartLine) {
-                                        foundStart = true;
-                                    }
-                                    braceCount++;
-                                } else if (char === '}') {
-                                    braceCount--;
-                                    if (foundStart && braceCount === 0) {
-                                        structEndLine = searchLine;
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if (structEndLine !== -1) {
-                                break;
-                            }
-
-                            searchLine++;
-                        }
-
-                        // 如果找到了结构体的范围，获取其中的文本
-                        if (structStartLine !== -1 && structEndLine !== -1) {
-                            for (let i = structStartLine; i <= structEndLine; i++) {
-                                existingText += document.lineAt(i).text + '\n';
-                            }
-                        }
-                    } else {
-                        // 对于顶层结构体，检查整个文档
-                        existingText = document.getText();
-                    }
-
-                    // 更精确的字段检测正则表达式
-                    const fieldRegex = new RegExp(`\\b${fieldName}\\s*:`, 'i');
-
-                    if (fieldRegex.test(existingText)) {
-                        outputChannel.appendLine(`字段已存在于结构体中，跳过: ${fieldName}`);
-                        continue;
-                    } else {
-                        outputChannel.appendLine(`字段不存在，将添加: ${fieldName}`);
-                    }
-
-                    // 添加字段并标记为已处理
-                    fields.push({
-                        name: fieldName,
-                        type: fieldType.replace('*', ''),
-                        isPointer: fieldType.startsWith('*'),
-                        isOptional: false
-                    });
-                    processedFields.add(fieldName);
+                if (item.kind != vscode.CompletionItemKind.Field) {
+                    continue;
                 }
+                const fieldName = typeof item.label === 'string' ? item.label : item.label.label;
+                if (fieldName.includes('.')) {
+                    continue;
+                }
+
+                if (checkFieldExistsInCurrentStruct(document, position, fieldName)) {
+                    outputChannel.appendLine(`字段已存在于当前结构体中，跳过: ${fieldName}`);
+                    continue;
+                }
+
+                const fieldType = item.detail || '';
+                const isPointer = fieldType.startsWith('*');
+                const isOptional = fieldType.endsWith('?');
+
+                // 添加字段
+                fields.push({
+                    name: fieldName,
+                    type: fieldType,
+                    isPointer: isPointer,
+                    isOptional: isOptional
+                });
             }
 
             if (fields.length === 0) {
@@ -536,119 +346,6 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(disposable);
-}
-
-async function findStructDefinition(structName: string, currentFileUri: vscode.Uri): Promise<string | null> {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) {
-        return null;
-    }
-
-    // 首先在当前文件中查找
-    const currentFileContent = await vscode.workspace.fs.readFile(currentFileUri);
-    const currentFileText = currentFileContent.toString();
-
-    // 改进正则表达式以匹配嵌套的结构体定义
-    const structRegex = new RegExp(`type\\s+${structName}\\s+struct\\s*{([^{}]|{[^{}]*})*}`);
-    const match = currentFileText.match(structRegex);
-    if (match) {
-        return match[0];
-    }
-
-    // 在工作区中查找
-    const files = await vscode.workspace.findFiles('**/*.go');
-    for (const file of files) {
-        const content = await vscode.workspace.fs.readFile(file);
-        const text = content.toString();
-        const match = text.match(structRegex);
-        if (match) {
-            return match[0];
-        }
-    }
-
-    // 如果结构体名称包含点（包名），尝试在第三方库中查找
-    if (structName.includes('.')) {
-        try {
-            // 获取当前工作目录
-            const workspaceRoot = workspaceFolders[0].uri.fsPath;
-
-            // 获取 go.mod 文件路径
-            const goModPath = path.join(workspaceRoot, 'go.mod');
-            if (!fs.existsSync(goModPath)) {
-                return null;
-            }
-
-            // 解析结构体名称，获取包名和结构体名
-            const parts = structName.split('.');
-            if (parts.length !== 2) {
-                return null;
-            }
-
-            const [packageName, structType] = parts;
-
-            // 使用 go list 命令获取模块信息
-            const { stdout: moduleInfo } = await execAsync('go list -m all', { cwd: workspaceRoot });
-            const modules = parseGoModules(moduleInfo);
-
-            // 在模块中查找结构体
-            for (const module of modules) {
-                const modulePath = path.join(process.env.GOPATH || path.join(os.homedir(), 'go'), 'pkg', 'mod', module.path + '@' + module.version);
-                if (fs.existsSync(modulePath)) {
-                    const files = await vscode.workspace.findFiles(new vscode.RelativePattern(modulePath, '**/*.go'));
-                    for (const file of files) {
-                        const content = await vscode.workspace.fs.readFile(file);
-                        const text = content.toString();
-                        const match = text.match(structRegex);
-                        if (match) {
-                            return match[0];
-                        }
-                    }
-                }
-            }
-        } catch (error) {
-            console.error('Error searching in third-party libraries:', error);
-        }
-    }
-
-    return null;
-}
-
-function parseGoModules(moduleInfo: string): GoModule[] {
-    return moduleInfo
-        .split('\n')
-        .filter(line => line.trim())
-        .map(line => {
-            const [path, version] = line.split(' ');
-            return { path, version };
-        });
-}
-
-function parseStructFields(structDefinition: string): GoField[] {
-    const fields: GoField[] = [];
-
-    // 提取结构体字段部分
-    const fieldsMatch = structDefinition.match(/{([^{}]*)}/);
-    if (!fieldsMatch) {
-        return fields;
-    }
-
-    const fieldsText = fieldsMatch[1];
-
-    // 改进正则表达式以匹配更复杂的字段定义
-    const fieldRegex = /(\w+)\s+([*]?[a-zA-Z0-9_\.\[\]<>]+)(?:\s*`[^`]*`)?(?:\s*\/\/[^\n]*)?/g;
-    let match;
-
-    while ((match = fieldRegex.exec(fieldsText)) !== null) {
-        const [, name, type] = match;
-        fields.push({
-            name,
-            type: type.replace('*', ''),
-            isPointer: type.startsWith('*'),
-            isOptional: false // 这里可以添加对 omitempty 标签的检查
-        });
-    }
-
-    return fields;
 }
 
 /**
@@ -847,4 +544,131 @@ function getDefaultValue(field: GoField): string {
 /**
  * 插件停用函数
  */
-export function deactivate() { } 
+export function deactivate() { }
+
+// 解析完整结构体名称
+function parseFullStructName(structName: string): { pkgName: string, structName: string } {
+    const parts = structName.split('.');
+    if (parts.length === 1) {
+        return { pkgName: '', structName: parts[0] };
+    }
+    return { pkgName: parts[0], structName: parts[1] };
+}
+
+async function getStructInfo(structName: string, document: vscode.TextDocument): Promise<vscode.CompletionList | null> {
+    const { pkgName, structName: structNameOnly } = parseFullStructName(structName);
+
+    // 如果是当前包的结构体
+    if (!pkgName) {
+        // 在当前包的所有.go文件中查找
+        const goFiles = await vscode.workspace.findFiles('**/*.go');
+        for (const file of goFiles) {
+            const fileDoc = await vscode.workspace.openTextDocument(file);
+            const fileText = fileDoc.getText();
+            const structRegex = new RegExp(`type\\s+${structNameOnly}\\s+struct\\s*{([^}]*)}`, 'g');
+            const match = structRegex.exec(fileText);
+            if (match) {
+                // 返回结构体信息
+                return {
+                    items: parseStructFields(match[1])
+                };
+            }
+        }
+    } else {
+        // 如果是其他包的结构体
+        // 查找导入的包路径
+        const importRegex = new RegExp(`import\\s+"([^"]+)"`, 'g');
+        const imports = [];
+        let match;
+        while ((match = importRegex.exec(document.getText())) !== null) {
+            imports.push(match[1]);
+        }
+
+        // 查找匹配的包
+        const pkgPath = imports.find(path => path.endsWith(pkgName));
+        if (pkgPath) {
+            // 在包路径中查找结构体
+            const pkgFiles = await vscode.workspace.findFiles(`${pkgPath}/**/*.go`);
+            for (const file of pkgFiles) {
+                const fileDoc = await vscode.workspace.openTextDocument(file);
+                const fileText = fileDoc.getText();
+                const structRegex = new RegExp(`type\\s+${structNameOnly}\\s+struct\\s*{([^}]*)}`, 'g');
+                const match = structRegex.exec(fileText);
+                if (match) {
+                    // 返回结构体信息
+                    return {
+                        items: parseStructFields(match[1])
+                    };
+                }
+            }
+        }
+    }
+
+    return null;
+}
+
+function parseStructFields(fieldsContent: string): vscode.CompletionItem[] {
+    const fieldRegex = /(\w+)\s+([^\n;]+)/g;
+    const fields: vscode.CompletionItem[] = [];
+    let match;
+    while ((match = fieldRegex.exec(fieldsContent)) !== null) {
+        const name = match[1];
+        const type = match[2].split('//')[0].trim();
+        fields.push({
+            label: name,
+            kind: vscode.CompletionItemKind.Field,
+            detail: type
+        });
+    }
+    return fields;
+}
+
+function checkFieldExistsInCurrentStruct(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    fieldName: string
+): boolean {
+    // 获取当前结构体的范围
+    const structRange = getCurrentStructRange(document, position);
+    if (!structRange) return false;
+
+    // 获取当前结构体的文本
+    const structText = document.getText(structRange);
+
+    // 检查字段是否存在
+    const fieldRegex = new RegExp(`\\b${fieldName}\\s*:`, 'i');
+    return fieldRegex.test(structText);
+}
+
+function getCurrentStructRange(document: vscode.TextDocument, position: vscode.Position): vscode.Range | null {
+    let startLine = position.line;
+    let endLine = position.line;
+
+    // 向上查找结构体开始位置
+    while (startLine >= 0) {
+        const lineText = document.lineAt(startLine).text;
+        if (lineText.includes('{')) {
+            break;
+        }
+        startLine--;
+    }
+
+    // 向下查找结构体结束位置
+    let braceCount = 0;
+    while (endLine < document.lineCount) {
+        const lineText = document.lineAt(endLine).text;
+        for (const char of lineText) {
+            if (char === '{') braceCount++;
+            if (char === '}') braceCount--;
+        }
+        if (braceCount === 0) break;
+        endLine++;
+    }
+
+    if (startLine < 0 || endLine >= document.lineCount) return null;
+
+    return new vscode.Range(
+        new vscode.Position(startLine, 0),
+        new vscode.Position(endLine, document.lineAt(endLine).text.length)
+    );
+} 
