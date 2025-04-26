@@ -22,35 +22,41 @@ Go Struct Auto Fill 是一个 Visual Studio Code 插件，用于自动填充 Go 
 ### 从源码安装
 
 1. **克隆仓库**：
+
 ```bash
 git clone https://github.com/leeprince/go-struct-auto-fill.git
 cd go-struct-auto-fill
 ```
 
 2. **安装依赖**：
+
 ```bash
 npm install
 ```
 
 3. **编译插件**：
+
 ```bash
 npm run compile
 ```
 
 4. **打包插件**：
+
 ```bash
 vsce package
 ```
 
 4.1 发布到 vscode 的 Marketplace.
-参考：https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publishing-extensions
+参考：<https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publishing-extensions>
 
 认证需要<publisher id>
+
 ```bash
 vsce login <publisher id>
 ```
 
 命令发布
+
 ```bash
 vsce publish
 ```
@@ -82,6 +88,7 @@ vsce publish
 ### 1. 结构体识别
 
 使用正则表达式匹配结构体初始化语句，支持以下格式：
+
 - `变量名 := 结构体名{`
 - `var 变量名 = 结构体名{`
 - `变量名 := &结构体名{`
@@ -90,6 +97,7 @@ vsce publish
 ### 2. 字段获取
 
 使用 VSCode 的 `vscode.executeCompletionItemProvider` API 获取结构体字段信息：
+
 - 通过 `CompletionItemKind.Field` 识别字段
 - 从补全项中提取字段名称和类型
 - 跳过嵌套字段（包含点的字段名）
@@ -98,6 +106,7 @@ vsce publish
 ### 3. 默认值生成
 
 根据字段类型生成合适的默认值：
+
 - 指针类型：`nil`
 - 字符串：`""`
 - 整数类型：`0`
@@ -133,10 +142,6 @@ vsce publish
    - 问题：日志信息没有正确显示在 VSCode 的输出面板中
    - 解决：使用 `vscode.window.createOutputChannel` 创建专门的输出通道，并确保在关键步骤添加日志
 
-5. **字段顺序和格式问题**
-   - 问题：字段顺序与结构体定义不一致，且存在多余的换行符
-   - 解决：实现字段排序算法，并优化换行符处理逻辑
-
 ### 技术要点
 
 1. **VSCode 插件开发**
@@ -155,11 +160,20 @@ vsce publish
    - 详细的日志记录
    - 用户友好的错误消息
 
-4. **代码格式化**
+4. **通知**
+   - 通过`vscode.window.showInformationMessage('<通知内容>')`实现VSCode的通知
+
+## 未来改进
+
+**欢迎感兴趣的朋友，参与改进。**
+
+1. **字段顺序和格式问题**
+   - 问题：字段顺序与结构体定义不一致，且存在多余的换行符
+2. **代码格式化**
    - 智能处理缩进和换行
    - 保持代码风格一致性
    - 优化部分字段已存在的情况
-
+3. 结构体识别：需要支持的 append 的赋值方式。如：`list = append(list, itme{<需要自动填充的结构体>})`
 
 ## 反馈与贡献
 
