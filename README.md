@@ -173,7 +173,14 @@ vsce publish
    - 智能处理缩进和换行
    - 保持代码风格一致性
    - 优化部分字段已存在的情况
-3. 结构体识别：需要支持的 append 的赋值方式。如：`list = append(list, itme{<需要自动填充的结构体>})`
+3. 结构体识别
+   - 需要支持的 append 的赋值方式。如：`list = append(list, itme{<需要自动填充的结构体>})`
+4. 链表结构体去重：
+如下面的链表结构体中存在嵌套结构体
+`type ListNode struct {
+  Val  int`json:"val,omitempty"`
+ Next *ListNode `json:"next,omitempty"`
+}`，那么在自动填充结构体字段时，父级或者子级存在字段后，当前层级的字段会被忽略了。
 
 ## 反馈与贡献
 

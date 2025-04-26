@@ -112,29 +112,24 @@ export function activate(context: vscode.ExtensionContext) {
 
         if (fieldAssignmentMatch) {
             outputChannel.appendLine(`检测到字段赋值: ${fieldAssignmentMatch[1]}: ${fieldAssignmentMatch[2]}`);
-
             // 向上查找找到包含结构体类型的行，如 "Next: ListNode{"
             let searchLine = position.line - 1;
             while (searchLine >= 0) {
                 const lineText = document.lineAt(searchLine).text;
                 outputChannel.appendLine(`向上查找结构体声明，检查行 ${searchLine}: ${lineText}`);
-
                 // 匹配嵌套结构体声明
                 const nestedStructRegex = /(\w+):\s*([\w\.]+)\s*{/;
                 const nestedMatch = lineText.match(nestedStructRegex);
-
                 if (nestedMatch) {
                     structName = nestedMatch[2]; // 捕获结构体名称，如 "ListNode"
                     isNestedStruct = true;
                     outputChannel.appendLine(`找到嵌套结构体声明: ${nestedMatch[1]}: ${structName}{`);
                     break;
                 }
-
                 // 如果遇到更高一级的结构体声明或其他关键代码，停止查找
                 if (lineText.includes(":=") || lineText.includes("func ")) {
                     break;
                 }
-
                 searchLine--;
             }
         }
