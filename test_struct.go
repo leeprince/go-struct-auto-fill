@@ -46,14 +46,12 @@ func main() {
 
 	// 简单嵌套
 	d1 := ddd1{
-		ID: "",
-
 		Age: 0,
-
+		ID:  "",
 		ddd2: &ddd2{
+			Address: "",
 			Name:    "",
 			Age:     0,
-			Address: "",
 		},
 	}
 
@@ -70,8 +68,9 @@ func main() {
 	// 数组初始化
 	dList := []ddd{
 		ddd{
+			Age: 0,
+
 			Name:    "",
-			Age:     0,
 			Address: "",
 		}, // 光标放在大括号里面，按快捷键应该能自动填充
 	}
@@ -79,8 +78,8 @@ func main() {
 	// map初始化
 	dMap := map[string]ddd{
 		"name": ddd{
-			Name:    "",
 			Age:     0,
+			Name:    "",
 			Address: "",
 		}, // 光标放在大括号里面，按快捷键应该能自动填充
 	}
@@ -88,9 +87,9 @@ func main() {
 	// append函数
 	var dSlice []ddd
 	dSlice = append(dSlice, ddd{
+		Address: "",
 		Name:    "",
 		Age:     0,
-		Address: "",
 	}) // 光标放在大括号里面，按快捷键应该能自动填充
 
 	// 函数参数（示例）
@@ -114,8 +113,8 @@ func main() {
 	complexMap := map[string][]ddd{
 		"items": []ddd{
 			ddd{
-				Name:    "",
 				Age:     0,
+				Name:    "",
 				Address: "",
 			}, // 光标放在大括号里面，按快捷键应该能自动填充
 		},

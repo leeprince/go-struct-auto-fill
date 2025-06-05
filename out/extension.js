@@ -59,72 +59,22 @@ function activate(context) {
         outputChannel.appendLine(`找到结构体: ${structName}, 类型: ${matchType}, 是否嵌套: ${isNestedStruct}`);
         try {
             outputChannel.appendLine('正在获取结构体信息...');
-            // 确定正确的位置获取补全项
+            // 不创建临时文档，直接在当前文档中获取补全项
+            outputChannel.appendLine('尝试在当前文档中直接获取结构体字段补全项，不创建任何临时文件');
+            // 优化补全位置的计算，适应不同的结构体初始化场景
             let completionPosition = position;
-            let tmpDocument = document;
-            // 为不同类型的结构体初始化创建合适的临时文档
+            // 对于复杂场景，尝试找到更合适的补全位置
             if (matchType !== 'variable' || isNestedStruct) {
-                try {
-                    // 首先尝试从当前文档中获取结构体定义
-                    const structDefinition = await findStructDefinition(structName, document, outputChannel);
-                    let tmpText;
-                    if (structDefinition) {
-                        // 如果找到了结构体定义，创建包含定义的临时文档
-                        tmpText = `package main\n\n${structDefinition}\n\nfunc main() {\n\ta := ${structName}{\n\t\t\n\t}\n}\n`;
-                    }
-                    else {
-                        // 如果没找到，使用原有的简单格式（可能是外部包的结构体）
-                        tmpText = `package main\n\nfunc main() {\n\ta := ${structName}{\n\t\t\n\t}\n}\n`;
-                    }
-                    const tmpUri = vscode.Uri.parse(`untitled:${structName}_temp.go`);
-                    // 创建临时文档并设置内容
-                    const doc = await vscode.workspace.openTextDocument(tmpUri);
-                    const edit = new vscode.WorkspaceEdit();
-                    edit.insert(tmpUri, new vscode.Position(0, 0), tmpText);
-                    await vscode.workspace.applyEdit(edit);
-                    // 确保文档内容同步
-                    await doc.save();
-                    tmpDocument = doc;
-                    // 设置补全位置在临时文档的结构体初始化处（大括号内部的空行）
-                    const lines = tmpText.split('\n');
-                    let foundStructLine = -1;
-                    outputChannel.appendLine(`临时文档总行数: ${lines.length}`);
-                    for (let i = 0; i < lines.length; i++) {
-                        outputChannel.appendLine(`行 ${i}: "${lines[i]}"`);
-                    }
-                    // 查找包含 "a := StructName{" 的行
-                    for (let i = 0; i < lines.length; i++) {
-                        if (lines[i].includes(`a := ${structName}{`)) {
-                            foundStructLine = i;
-                            outputChannel.appendLine(`找到结构体声明在行 ${i}: "${lines[i]}"`);
-                            break;
-                        }
-                    }
-                    if (foundStructLine !== -1) {
-                        // 补全位置设置在结构体行的下一行（空行），使用适当的缩进
-                        completionPosition = new vscode.Position(foundStructLine + 1, 2); // 下一行，2个字符缩进
-                        outputChannel.appendLine(`设置补全位置在行 ${foundStructLine + 1}:2`);
-                        outputChannel.appendLine(`补全位置的行内容: "${lines[foundStructLine + 1] || '(空行)'}"`);
-                    }
-                    else {
-                        // 如果没找到，使用默认位置
-                        completionPosition = new vscode.Position(lines.length - 3, 2); // 倒数第三行
-                        outputChannel.appendLine(`未找到结构体声明行，使用默认位置: ${lines.length - 3}:2`);
-                    }
-                    outputChannel.appendLine(`创建临时文档获取 ${structName} 的补全项，位置: ${completionPosition.line}:${completionPosition.character}`);
-                    outputChannel.appendLine(`临时文档内容:\n${tmpText}`);
-                    // 给 gopls 一些时间来解析新文档
-                    await new Promise(resolve => setTimeout(resolve, 200));
-                }
-                catch (err) {
-                    outputChannel.appendLine(`创建临时文档出错: ${err}`);
+                const optimizedPosition = findOptimalCompletionPosition(document, position, structName, matchType, outputChannel);
+                if (optimizedPosition) {
+                    completionPosition = optimizedPosition;
                 }
             }
-            // 使用 gopls 的 API 获取结构体信息
+            // 使用 gopls 的 API 获取结构体信息（原有逻辑，用于普通变量初始化）
             let completionItems;
             try {
-                outputChannel.appendLine(`尝试在 ${tmpDocument.uri.toString()} 的位置 ${completionPosition.line}:${completionPosition.character} 获取补全项`);
-                completionItems = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', tmpDocument.uri, completionPosition);
+                outputChannel.appendLine(`尝试在当前文档 ${document.uri.toString()} 的位置 ${completionPosition.line}:${completionPosition.character} 获取补全项`);
+                completionItems = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', document.uri, completionPosition);
             }
             catch (err) {
                 outputChannel.appendLine(`获取补全项时出错: ${err}`);
@@ -956,22 +906,59 @@ function getCurrentStructRange(document, position) {
         return null;
     return new vscode.Range(new vscode.Position(startLine, 0), new vscode.Position(endLine, document.lineAt(endLine).text.length));
 }
-async function findStructDefinition(structName, document, outputChannel) {
-    // 在当前包的所有.go文件中查找
-    const goFiles = await vscode.workspace.findFiles('**/*.go');
-    for (const file of goFiles) {
-        const fileDoc = await vscode.workspace.openTextDocument(file);
-        const fileText = fileDoc.getText();
-        const structRegex = new RegExp(`(type\\s+${structName}\\s+struct\\s*{[^}]*})`, 'g');
-        const match = structRegex.exec(fileText);
-        if (match) {
-            // 返回完整的结构体定义
-            outputChannel.appendLine(`找到结构体定义: ${match[1]}`);
-            return match[1];
+/**
+ * 在当前文档中寻找最佳的补全位置
+ * 避免创建临时文档，直接在现有代码中找到合适的位置获取结构体字段补全
+ */
+function findOptimalCompletionPosition(document, position, structName, matchType, outputChannel) {
+    outputChannel.appendLine(`为 ${structName} (类型: ${matchType}) 寻找最佳补全位置`);
+    // 在当前位置附近寻找结构体初始化语句
+    const currentLine = document.lineAt(position.line);
+    const currentLineText = currentLine.text;
+    // 如果当前行包含结构体名称和大括号，尝试在大括号内获取补全
+    const structInitRegex = new RegExp(`${structName}\\s*{`);
+    if (structInitRegex.test(currentLineText)) {
+        const braceIndex = currentLineText.indexOf('{');
+        if (braceIndex !== -1) {
+            const testPosition = new vscode.Position(position.line, braceIndex + 1);
+            outputChannel.appendLine(`在当前行找到结构体初始化，使用位置 ${position.line}:${braceIndex + 1}`);
+            return testPosition;
         }
     }
-    // 如果未找到结构体定义，返回 null
-    outputChannel.appendLine(`未找到结构体 ${structName} 的定义`);
+    // 向上查找最近的结构体声明
+    for (let lineOffset = 0; lineOffset <= 5; lineOffset++) {
+        const targetLine = position.line - lineOffset;
+        if (targetLine < 0)
+            break;
+        const lineText = document.lineAt(targetLine).text;
+        // 检查是否包含目标结构体的初始化
+        if (lineText.includes(structName) && lineText.includes('{')) {
+            const braceIndex = lineText.indexOf('{');
+            if (braceIndex !== -1) {
+                // 尝试在大括号后面的位置
+                let testPosition;
+                // 如果大括号在行末，检查下一行
+                if (braceIndex === lineText.trim().length - 1) {
+                    if (targetLine + 1 < document.lineCount) {
+                        const nextLineText = document.lineAt(targetLine + 1).text;
+                        const indentMatch = nextLineText.match(/^(\s*)/);
+                        const indent = indentMatch ? indentMatch[1].length : 0;
+                        testPosition = new vscode.Position(targetLine + 1, Math.max(indent, 2));
+                    }
+                    else {
+                        testPosition = new vscode.Position(targetLine, braceIndex + 1);
+                    }
+                }
+                else {
+                    testPosition = new vscode.Position(targetLine, braceIndex + 1);
+                }
+                outputChannel.appendLine(`在行 ${targetLine} 找到结构体初始化，使用位置 ${testPosition.line}:${testPosition.character}`);
+                return testPosition;
+            }
+        }
+    }
+    // 如果没有找到特殊位置，返回当前位置
+    outputChannel.appendLine('未找到特殊的补全位置，使用当前光标位置');
     return null;
 }
 //# sourceMappingURL=extension.js.map
