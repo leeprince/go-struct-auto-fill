@@ -86,7 +86,6 @@ func main() {
 	// 测试场景7：map中的有序填充
 	dMap := map[string]ddd{
 		"key1": ddd{
-
 			Name:    "map_value",
 			Age:     0,
 			Address: "",
@@ -96,16 +95,16 @@ func main() {
 	// 测试场景8：append函数中的有序填充
 	var dSlice []ddd
 	dSlice = append(dSlice, ddd{
-
 		Name:    "",
 		Age:     0,
 		Address: "",
 	})
 
-	// 测试场景9：函数参数中的有序填充
+	// 测试场景9：函数参数中的有序填充。
 	processStruct(ddd{
-		// todo
-		Age: 0,
+		// todo: 只会保留当前不存在的字段
+		Name:    "",
+		Address: "",
 	})
 
 	// 测试场景10：完全空的结构体（边界情况）

@@ -2,7 +2,7 @@
   "name": "go-struct-auto-fill",
   "displayName": "Go Struct Auto Fill",
   "description": "Automatically fill Go struct fields with default values",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "engines": {
     "vscode": "^1.60.0"
   },

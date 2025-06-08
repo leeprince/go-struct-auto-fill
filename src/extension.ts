@@ -988,81 +988,27 @@ function generateFillCode(fields: GoField[], outputChannel: vscode.OutputChannel
 
     outputChannel.appendLine(`开始生成代码，匹配类型: ${matchType}, 当前位置: ${position.line}:${position.character}`);
 
-    // 根据匹配类型确定缩进策略
-    let baseIndent = '';
-    let innerIndent = '';
+    // 分析缩进信息
+    const indentInfo = analyzeIndentInfo(document, position, outputChannel);
+    outputChannel.appendLine(`使用${indentInfo.type}缩进，大小: ${indentInfo.size}`);
+    outputChannel.appendLine(`基础缩进: '${indentInfo.baseIndent}'`);
+    outputChannel.appendLine(`字段缩进: '${indentInfo.fieldIndent}'`);
 
-    // 获取当前行或相关行的缩进
-    const currentLine = document.lineAt(position.line);
-    const currentLineText = currentLine.text;
-
-    // 查找包含左大括号的行来确定基础缩进
-    let braceLineText = currentLineText;
-    let braceLineIndex = position.line;
-
-    // 如果当前行没有左大括号，向上查找
-    if (!currentLineText.includes('{')) {
-        for (let i = position.line - 1; i >= Math.max(0, position.line - 5); i--) {
-            const lineText = document.lineAt(i).text;
-            if (lineText.includes('{')) {
-                braceLineText = lineText;
-                braceLineIndex = i;
-                break;
-            }
-        }
-    }
-
-    // 提取基础缩进
-    const braceIndentMatch = braceLineText.match(/^(\s*)/);
-    baseIndent = braceIndentMatch ? braceIndentMatch[1] : '';
-
-    outputChannel.appendLine(`基础缩进行 ${braceLineIndex}: '${braceLineText}'`);
-    outputChannel.appendLine(`提取的基础缩进: '${baseIndent}' (长度: ${baseIndent.length})`);
-
-    // 根据匹配类型调整缩进策略
-    switch (matchType) {
-        case 'array':
-            // 数组中的结构体，通常需要额外的缩进
-            innerIndent = baseIndent + '    ';
-            outputChannel.appendLine(`数组模式，内部缩进: '${innerIndent}'`);
-            break;
-
-        case 'map':
-            // map中的结构体，通常需要额外的缩进
-            innerIndent = baseIndent + '    ';
-            outputChannel.appendLine(`map模式，内部缩进: '${innerIndent}'`);
-            break;
-
-        case 'append':
-            // append函数中的结构体，通常需要额外的缩进
-            innerIndent = baseIndent + '    ';
-            outputChannel.appendLine(`append模式，内部缩进: '${innerIndent}'`);
-            break;
-
-        case 'function_param':
-            // 函数参数中的结构体，通常需要额外的缩进
-            innerIndent = baseIndent + '    ';
-            outputChannel.appendLine(`函数参数模式，内部缩进: '${innerIndent}'`);
-            break;
-
-        case 'nested':
-            // 嵌套结构体，需要更深的缩进
-            innerIndent = baseIndent + '    ';
-            outputChannel.appendLine(`嵌套结构体模式，内部缩进: '${innerIndent}'`);
-            break;
-
-        case 'variable':
-        default:
-            // 普通变量初始化，标准缩进
-            innerIndent = baseIndent + '    ';
-            outputChannel.appendLine(`变量初始化模式，内部缩进: '${innerIndent}'`);
-            break;
-    }
+    // 获取现有字段的对齐信息
+    const existingFields = parseExistingStructFields(document, position, outputChannel);
+    let maxFieldNameLength = 0;
+    existingFields.forEach((_, fieldName) => {
+        maxFieldNameLength = Math.max(maxFieldNameLength, fieldName.length);
+    });
 
     // 生成字段代码
     const fieldLines = fields.map(field => {
         const defaultValue = getDefaultValue(field);
-        return `${innerIndent}${field.name}: ${defaultValue},`;
+        // 使用与现有字段相同的对齐方式
+        const fieldName = field.name.padEnd(maxFieldNameLength);
+        // 确保使用 tab 字符
+        const indent = indentInfo.type === 'tab' ? '\t' : indentInfo.fieldIndent;
+        return `${indent}${fieldName}: ${defaultValue},`;
     });
 
     // 如果没有字段，不生成代码
@@ -1079,18 +1025,11 @@ function generateFillCode(fields: GoField[], outputChannel: vscode.OutputChannel
         case 'map':
         case 'append':
         case 'function_param':
-            // 这些场景通常在一行内，需要紧凑的格式
-            generatedCode = `\n${fieldLines.join('\n')}\n${baseIndent}`;
-            break;
-
         case 'nested':
-            // 嵌套结构体，使用标准格式
-            generatedCode = `\n${fieldLines.join('\n')}\n${baseIndent}`;
-            break;
-
         case 'variable':
         default:
-            // 普通变量初始化，使用标准格式
+            // 使用标准格式，保持一致的缩进
+            const baseIndent = indentInfo.type === 'tab' ? '\t' : indentInfo.baseIndent;
             generatedCode = `\n${fieldLines.join('\n')}\n${baseIndent}`;
             break;
     }
@@ -1361,216 +1300,29 @@ function parseExistingStructFields(
     position: vscode.Position,
     outputChannel: vscode.OutputChannel
 ): Map<string, string> {
-    const existingFields = new Map<string, string>();
-
-    try {
-        // 获取当前结构体的范围
-        const structRange = getCurrentStructRange(document, position);
-        if (!structRange) {
-            outputChannel.appendLine('无法确定当前结构体范围');
-            return existingFields;
-        }
-
-        // 获取结构体内容
-        const structText = document.getText(structRange);
-        outputChannel.appendLine(`当前结构体内容:\n${structText}`);
-
-        // 使用更智能的算法来解析字段，支持嵌套结构体
-        const fields = parseStructFieldsWithComplexValues(structText, outputChannel);
-
-        for (const [fieldName, fieldValue] of fields) {
-            existingFields.set(fieldName, fieldValue);
-            outputChannel.appendLine(`解析到已有字段: ${fieldName} = ${fieldValue}`);
-        }
-
-        outputChannel.appendLine(`总共解析到 ${existingFields.size} 个已有字段`);
-    } catch (error) {
-        outputChannel.appendLine(`解析已有字段时出错: ${error}`);
-    }
-
-    return existingFields;
-}
-
-/**
- * 解析包含复杂值（如嵌套结构体）的结构体字段
- */
-function parseStructFieldsWithComplexValues(
-    structText: string,
-    outputChannel: vscode.OutputChannel
-): Map<string, string> {
     const fields = new Map<string, string>();
 
-    // 移除开头和结尾的大括号，只处理内容
-    const cleanText = structText.trim();
-    let content = cleanText;
-
-    // 找到第一个 { 和最后一个 }，提取中间内容
-    const firstBraceIndex = content.indexOf('{');
-    const lastBraceIndex = content.lastIndexOf('}');
-
-    if (firstBraceIndex !== -1 && lastBraceIndex !== -1 && firstBraceIndex < lastBraceIndex) {
-        content = content.substring(firstBraceIndex + 1, lastBraceIndex).trim();
-    }
-
-    outputChannel.appendLine(`提取的字段内容: "${content}"`);
-
-    if (!content) {
-        return fields;
-    }
-
-    // 使用状态机来解析字段
-    let i = 0;
-    const textLength = content.length;
-
-    while (i < textLength) {
-        // 跳过空白字符和注释
-        while (i < textLength && (content[i] === ' ' || content[i] === '\t' || content[i] === '\n' || content[i] === '\r')) {
-            i++;
+    // 获取当前行和周围几行的文本
+    const lines: string[] = [];
+    for (let i = Math.max(0, position.line - 2); i <= position.line + 2; i++) {
+        if (i < document.lineCount) {
+            lines.push(document.lineAt(i).text);
         }
+    }
 
-        if (i >= textLength) break;
-
-        // 跳过注释行
-        if (content.substring(i, i + 2) === '//') {
-            while (i < textLength && content[i] !== '\n') {
-                i++;
+    // 查找字段行
+    for (const line of lines) {
+        const fieldMatch = line.match(/^\s*(\w+)\s*:/);
+        if (fieldMatch) {
+            const fieldName = fieldMatch[1];
+            const valueMatch = line.match(/:\s*(.+),/);
+            if (valueMatch) {
+                fields.set(fieldName, valueMatch[1].trim());
             }
-            continue;
-        }
-
-        // 查找字段名（标识符）
-        const fieldNameStart = i;
-        while (i < textLength && /\w/.test(content[i])) {
-            i++;
-        }
-
-        if (i === fieldNameStart) {
-            // 没找到有效的字段名，跳过当前字符
-            i++;
-            continue;
-        }
-
-        const fieldName = content.substring(fieldNameStart, i).trim();
-
-        // 跳过空白字符
-        while (i < textLength && /\s/.test(content[i])) {
-            i++;
-        }
-
-        // 检查是否有冒号
-        if (i >= textLength || content[i] !== ':') {
-            continue;
-        }
-
-        i++; // 跳过冒号
-
-        // 跳过冒号后的空白字符
-        while (i < textLength && /\s/.test(content[i])) {
-            i++;
-        }
-
-        // 解析字段值（这是关键部分）
-        const fieldValue = parseFieldValue(content, i, outputChannel);
-
-        if (fieldValue.value) {
-            fields.set(fieldName, fieldValue.value);
-            outputChannel.appendLine(`字段解析成功: ${fieldName} = "${fieldValue.value}"`);
-        }
-
-        i = fieldValue.nextIndex;
-
-        // 跳过可能的逗号
-        while (i < textLength && (content[i] === ',' || /\s/.test(content[i]))) {
-            i++;
         }
     }
 
     return fields;
-}
-
-/**
- * 解析字段值，支持嵌套结构体、字符串、数字等复杂类型
- */
-function parseFieldValue(
-    content: string,
-    startIndex: number,
-    outputChannel: vscode.OutputChannel
-): { value: string, nextIndex: number } {
-    let i = startIndex;
-    const textLength = content.length;
-    let braceCount = 0;
-    let inString = false;
-    let stringChar = '';
-    const valueStart = i;
-
-    outputChannel.appendLine(`开始解析字段值，起始位置: ${startIndex}`);
-
-    while (i < textLength) {
-        const char = content[i];
-
-        // 处理字符串
-        if (!inString && (char === '"' || char === '`' || char === "'")) {
-            inString = true;
-            stringChar = char;
-        } else if (inString && char === stringChar && content[i - 1] !== '\\') {
-            inString = false;
-            stringChar = '';
-        }
-
-        // 如果在字符串内，跳过所有特殊字符处理
-        if (inString) {
-            i++;
-            continue;
-        }
-
-        // 处理大括号
-        if (char === '{') {
-            braceCount++;
-        } else if (char === '}') {
-            braceCount--;
-        } else if (char === ',' && braceCount === 0) {
-            // 遇到逗号且不在嵌套结构体内，字段值结束
-            break;
-        } else if (char === '\n' && braceCount === 0) {
-            // 遇到换行符且不在嵌套结构体内，检查下一行是否是新字段
-            let j = i + 1;
-            // 跳过空白字符
-            while (j < textLength && /\s/.test(content[j]) && content[j] !== '\n') {
-                j++;
-            }
-
-            // 如果下一个非空白字符是字母（可能是字段名），则当前字段值结束
-            if (j < textLength && /[a-zA-Z]/.test(content[j])) {
-                // 检查这是否真的是一个字段（后面跟着冒号）
-                let k = j;
-                while (k < textLength && /\w/.test(content[k])) {
-                    k++;
-                }
-                // 跳过空白
-                while (k < textLength && /\s/.test(content[k])) {
-                    k++;
-                }
-                if (k < textLength && content[k] === ':') {
-                    // 确实是新字段，当前字段值结束
-                    break;
-                }
-            }
-        }
-
-        i++;
-    }
-
-    const value = content.substring(valueStart, i).trim();
-
-    // 移除末尾的逗号（如果有的话）
-    const cleanValue = value.replace(/,\s*$/, '').trim();
-
-    outputChannel.appendLine(`解析到字段值: "${cleanValue}", 下一个位置: ${i}`);
-
-    return {
-        value: cleanValue,
-        nextIndex: i
-    };
 }
 
 /**
@@ -1688,58 +1440,162 @@ async function generateOrderedFieldsCode(
 }
 
 /**
- * 计算正确的缩进信息
+ * 计算正确的缩进信息 - 重新设计，更可靠地检测缩进
  */
 function calculateProperIndent(
     document: vscode.TextDocument,
     position: vscode.Position,
     outputChannel: vscode.OutputChannel
 ): { baseIndent: string, fieldIndent: string } {
+    outputChannel.appendLine(`开始计算缩进，当前位置: ${position.line}:${position.character}`);
 
-    // 获取当前结构体的范围来分析缩进模式
-    const structRange = getCurrentStructRange(document, position);
-    if (!structRange) {
-        // 如果无法确定结构体范围，使用默认缩进
-        return { baseIndent: '', fieldIndent: '\t' };
-    }
+    // 获取当前行文本
+    const currentLineText = document.lineAt(position.line).text;
+    outputChannel.appendLine(`当前行文本: '${currentLineText}'`);
 
-    // 查找包含开大括号的行
-    let braceLineIndent = '';
-    for (let lineNum = structRange.start.line; lineNum <= structRange.end.line; lineNum++) {
-        const lineText = document.lineAt(lineNum).text;
-        if (lineText.includes('{')) {
-            const indentMatch = lineText.match(/^(\s*)/);
-            braceLineIndent = indentMatch ? indentMatch[1] : '';
-            outputChannel.appendLine(`找到大括号行 ${lineNum}: '${lineText}'`);
-            outputChannel.appendLine(`大括号行缩进: '${braceLineIndent}' (长度: ${braceLineIndent.length})`);
+    // 获取当前行缩进
+    const currentIndentMatch = currentLineText.match(/^(\s*)/);
+    const currentIndent = currentIndentMatch ? currentIndentMatch[1] : '';
+    outputChannel.appendLine(`当前行缩进: '${currentIndent}' (长度: ${currentIndent.length})`);
+
+    // 向上查找开大括号行
+    let braceLine = -1;
+    let braceCharPos = -1;
+    for (let i = position.line; i >= 0; i--) {
+        const lineText = document.lineAt(i).text;
+        const bracePos = lineText.indexOf('{');
+        if (bracePos !== -1) {
+            braceLine = i;
+            braceCharPos = bracePos;
             break;
         }
     }
 
-    // 分析现有字段的缩进模式
-    let existingFieldIndent = '';
-    const structText = document.getText(structRange);
-    const fieldLines = structText.split('\n').filter(line => {
-        const trimmed = line.trim();
-        return trimmed.includes(':') && !trimmed.startsWith('//');
-    });
+    outputChannel.appendLine(`找到开大括号行 ${braceLine}: '${braceLine >= 0 ? document.lineAt(braceLine).text : ''}'`);
 
-    if (fieldLines.length > 0) {
-        // 使用现有字段的缩进模式
-        const firstFieldLine = fieldLines[0];
-        const indentMatch = firstFieldLine.match(/^(\s*)/);
-        existingFieldIndent = indentMatch ? indentMatch[1] : '';
-        outputChannel.appendLine(`现有字段缩进: '${existingFieldIndent}' (长度: ${existingFieldIndent.length})`);
-    } else {
-        // 如果没有现有字段，使用大括号缩进 + tab
-        existingFieldIndent = braceLineIndent + '\t';
-        outputChannel.appendLine(`没有现有字段，使用计算的缩进: '${existingFieldIndent}' (长度: ${existingFieldIndent.length})`);
+    // 获取基础缩进
+    let baseIndent = '';
+    if (braceLine >= 0) {
+        const lineText = document.lineAt(braceLine).text;
+        const indentMatch = lineText.match(/^(\s*)/);
+        baseIndent = indentMatch ? indentMatch[1] : '';
     }
 
-    return {
-        baseIndent: braceLineIndent,
-        fieldIndent: existingFieldIndent
-    };
+    outputChannel.appendLine(`基础缩进: '${baseIndent}' (长度: ${baseIndent.length})`);
+
+    // 分析缩进类型
+    const useTabs = currentIndent.includes('\t');
+    let fieldIndent: string;
+
+    if (useTabs) {
+        // 如果使用 tab，保持 tab 缩进
+        fieldIndent = baseIndent + '\t';
+    } else {
+        // 如果使用空格，保持空格缩进
+        const spaceCount = baseIndent.length;
+        const indentSize = spaceCount % 4 === 0 ? 4 : 2;
+        fieldIndent = baseIndent + ' '.repeat(indentSize);
+    }
+
+    outputChannel.appendLine(`使用${useTabs ? 'tab' : '空格'}缩进`);
+    outputChannel.appendLine(`使用的字段缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
+
+    return { baseIndent, fieldIndent };
+}
+
+/**
+ * 直接从当前光标位置附近分析字段缩进
+ */
+function analyzeDirectFieldIndent(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    outputChannel: vscode.OutputChannel
+): { baseIndent: string, fieldIndent: string } | null {
+
+    outputChannel.appendLine('尝试直接分析字段缩进');
+
+    // 向上和向下查找最近的字段行
+    const searchRange = 10; // 搜索范围
+
+    for (let offset = 0; offset <= searchRange; offset++) {
+        // 向上查找
+        if (offset > 0) {
+            const upLine = position.line - offset;
+            if (upLine >= 0) {
+                const fieldIndent = extractFieldIndentFromLine(document, upLine, outputChannel);
+                if (fieldIndent) {
+                    return fieldIndent;
+                }
+            }
+        }
+
+        // 向下查找
+        const downLine = position.line + offset;
+        if (downLine < document.lineCount) {
+            const fieldIndent = extractFieldIndentFromLine(document, downLine, outputChannel);
+            if (fieldIndent) {
+                return fieldIndent;
+            }
+        }
+    }
+
+    outputChannel.appendLine('直接分析未找到有效缩进');
+    return null;
+}
+
+/**
+ * 从指定行提取字段缩进信息
+ */
+function extractFieldIndentFromLine(
+    document: vscode.TextDocument,
+    lineNum: number,
+    outputChannel: vscode.OutputChannel
+): { baseIndent: string, fieldIndent: string } | null {
+
+    const lineText = document.lineAt(lineNum).text;
+    const trimmed = lineText.trim();
+
+    // 检查是否是有效的字段行
+    if (trimmed.includes(':') && !trimmed.startsWith('//') && !trimmed.startsWith('*')) {
+        const fieldMatch = trimmed.match(/^(\w+)\s*:\s*/);
+        if (fieldMatch) {
+            const indentMatch = lineText.match(/^(\s*)/);
+            const fieldIndent = indentMatch ? indentMatch[1] : '';
+
+            outputChannel.appendLine(`在行 ${lineNum} 找到字段: '${lineText.trim()}'`);
+            outputChannel.appendLine(`提取的缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
+
+            // 计算基础缩进（通常是字段缩进减去一个tab或若干空格）
+            let baseIndent = '';
+            if (fieldIndent.endsWith('\t')) {
+                baseIndent = fieldIndent.slice(0, -1);
+            } else if (fieldIndent.length >= 4 && fieldIndent.endsWith('    ')) {
+                baseIndent = fieldIndent.slice(0, -4);
+            } else if (fieldIndent.length >= 2 && fieldIndent.endsWith('  ')) {
+                baseIndent = fieldIndent.slice(0, -2);
+            }
+
+            return {
+                baseIndent: baseIndent,
+                fieldIndent: fieldIndent
+            };
+        }
+    }
+
+    return null;
+}
+
+/**
+ * 分析缩进类型（tab或空格）
+ */
+function analyzeIndentType(indent: string): string {
+    if (indent.includes('\t')) {
+        const tabCount = (indent.match(/\t/g) || []).length;
+        const spaceCount = indent.replace(/\t/g, '').length;
+        return `${tabCount} tabs + ${spaceCount} spaces`;
+    } else {
+        return `${indent.length} spaces`;
+    }
 }
 
 /**
@@ -1879,5 +1735,245 @@ function parseStructFieldsFromDefinition(
 
     outputChannel.appendLine(`总共解析到 ${fields.length} 个字段，顺序: [${fields.map(f => f.name).join(', ')}]`);
     return fields;
+}
+
+function analyzeExistingIndent(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    outputChannel: vscode.OutputChannel
+): { baseIndent: string, fieldIndent: string } {
+    outputChannel.appendLine(`开始分析现有缩进，当前位置: ${position.line}:${position.character}`);
+
+    // 获取当前行和周围几行的文本
+    const lines: string[] = [];
+    for (let i = Math.max(0, position.line - 2); i <= position.line + 2; i++) {
+        if (i < document.lineCount) {
+            lines.push(document.lineAt(i).text);
+        }
+    }
+
+    outputChannel.appendLine('分析的行:');
+    lines.forEach((line, index) => {
+        outputChannel.appendLine(`行 ${index}: '${line}'`);
+    });
+
+    // 查找左大括号行
+    let braceLineIndex = -1;
+    let braceLineText = '';
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes('{')) {
+            braceLineIndex = i;
+            braceLineText = lines[i];
+            break;
+        }
+    }
+
+    if (braceLineIndex === -1) {
+        outputChannel.appendLine('未找到左大括号行，使用默认缩进');
+        return { baseIndent: '', fieldIndent: '\t' };
+    }
+
+    // 提取左大括号行的缩进
+    const braceIndentMatch = braceLineText.match(/^(\s*)/);
+    const baseIndent = braceIndentMatch ? braceIndentMatch[1] : '';
+    outputChannel.appendLine(`左大括号行缩进: '${baseIndent}' (长度: ${baseIndent.length})`);
+
+    // 查找字段行
+    let fieldIndent = '';
+    for (let i = braceLineIndex + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.includes(':') && !line.trim().startsWith('//')) {
+            const fieldIndentMatch = line.match(/^(\s*)/);
+            if (fieldIndentMatch) {
+                fieldIndent = fieldIndentMatch[1];
+                outputChannel.appendLine(`找到字段行缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
+                break;
+            }
+        }
+    }
+
+    // 如果没有找到字段行，使用左大括号行缩进 + 一个缩进单位
+    if (!fieldIndent) {
+        const indentType = analyzeIndentType(baseIndent);
+        if (indentType.includes('tabs')) {
+            fieldIndent = baseIndent + '\t';
+        } else {
+            // 检查是否使用2个或4个空格
+            const spaceCount = baseIndent.length;
+            const indentSize = spaceCount % 4 === 0 ? 4 : 2;
+            fieldIndent = baseIndent + ' '.repeat(indentSize);
+        }
+        outputChannel.appendLine(`使用计算的字段缩进: '${fieldIndent}'`);
+    }
+
+    return {
+        baseIndent: baseIndent,
+        fieldIndent: fieldIndent
+    };
+}
+
+function analyzeIndentFromContext(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    outputChannel: vscode.OutputChannel
+): { baseIndent: string, fieldIndent: string, useTabs: boolean } {
+    outputChannel.appendLine(`开始分析上下文缩进，当前位置: ${position.line}:${position.character}`);
+
+    // 向上查找非空行
+    let currentLine = position.line;
+    while (currentLine >= 0) {
+        const lineText = document.lineAt(currentLine).text;
+        if (lineText.trim() !== '') {
+            outputChannel.appendLine(`找到非空行 ${currentLine}: '${lineText}'`);
+
+            // 检查是否是变量初始化
+            if (lineText.match(/^\s*[\w\.]+\s*(?::=|=|:)\s*(?:&?[\w\.]+|\[\]|map\[string\])/)) {
+                outputChannel.appendLine('检测到变量初始化行');
+                const indentMatch = lineText.match(/^(\s*)/);
+                const baseIndent = indentMatch ? indentMatch[1] : '';
+
+                // 分析缩进类型
+                const useTabs = baseIndent.includes('\t');
+                let fieldIndent: string;
+
+                if (useTabs) {
+                    fieldIndent = baseIndent + '\t';
+                } else {
+                    // 检查是否使用2个或4个空格
+                    const spaceCount = baseIndent.length;
+                    const indentSize = spaceCount % 4 === 0 ? 4 : 2;
+                    fieldIndent = baseIndent + ' '.repeat(indentSize);
+                }
+
+                outputChannel.appendLine(`变量初始化行缩进: '${baseIndent}' (使用${useTabs ? 'tab' : '空格'})`);
+                outputChannel.appendLine(`计算的字段缩进: '${fieldIndent}'`);
+                return { baseIndent, fieldIndent, useTabs };
+            }
+
+            // 检查是否是字段行
+            if (lineText.match(/^\s*\w+\s*:/)) {
+                outputChannel.appendLine('检测到字段行');
+                const indentMatch = lineText.match(/^(\s*)/);
+                const fieldIndent = indentMatch ? indentMatch[1] : '';
+                const useTabs = fieldIndent.includes('\t');
+
+                // 向上查找变量初始化行来获取基础缩进
+                let baseIndent = '';
+                for (let i = currentLine - 1; i >= 0; i--) {
+                    const prevLine = document.lineAt(i).text;
+                    if (prevLine.match(/^\s*[\w\.]+\s*(?::=|=|:)\s*(?:&?[\w\.]+|\[\]|map\[string\])/)) {
+                        const baseIndentMatch = prevLine.match(/^(\s*)/);
+                        baseIndent = baseIndentMatch ? baseIndentMatch[1] : '';
+                        break;
+                    }
+                }
+
+                outputChannel.appendLine(`字段行缩进: '${fieldIndent}' (使用${useTabs ? 'tab' : '空格'})`);
+                outputChannel.appendLine(`基础缩进: '${baseIndent}'`);
+                return { baseIndent, fieldIndent, useTabs };
+            }
+        }
+        currentLine--;
+    }
+
+    // 如果没有找到合适的行，使用默认缩进
+    outputChannel.appendLine('未找到合适的行，使用默认缩进');
+    return { baseIndent: '', fieldIndent: '\t', useTabs: true };
+}
+
+interface IndentInfo {
+    type: 'tab' | 'space';
+    size: number;
+    baseIndent: string;
+    fieldIndent: string;
+}
+
+function analyzeIndentInfo(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    outputChannel: vscode.OutputChannel
+): IndentInfo {
+    outputChannel.appendLine(`开始分析缩进信息，当前位置: ${position.line}:${position.character}`);
+
+    // 向上查找非空行
+    let currentLine = position.line;
+    while (currentLine >= 0) {
+        const lineText = document.lineAt(currentLine).text;
+        if (lineText.trim() !== '') {
+            outputChannel.appendLine(`找到非空行 ${currentLine}: '${lineText}'`);
+
+            // 获取缩进
+            const indentMatch = lineText.match(/^(\s*)/);
+            const indent = indentMatch ? indentMatch[1] : '';
+
+            // 分析缩进类型和大小
+            const useTabs = indent.includes('\t');
+            let indentSize = 0;
+
+            if (useTabs) {
+                // 计算 tab 数量
+                indentSize = (indent.match(/\t/g) || []).length;
+                outputChannel.appendLine(`检测到 tab 缩进，数量: ${indentSize}`);
+            } else {
+                // 计算空格数量
+                indentSize = indent.length;
+                outputChannel.appendLine(`检测到空格缩进，数量: ${indentSize}`);
+            }
+
+            // 检查是否是变量初始化
+            if (lineText.match(/^\s*[\w\.]+\s*(?::=|=|:)\s*(?:&?[\w\.]+|\[\]|map\[string\])/)) {
+                outputChannel.appendLine('检测到变量初始化行');
+                const baseIndent = indent;
+                let fieldIndent: string;
+
+                if (useTabs) {
+                    fieldIndent = baseIndent + '\t';
+                } else {
+                    fieldIndent = baseIndent + ' '.repeat(indentSize);
+                }
+
+                return {
+                    type: useTabs ? 'tab' : 'space',
+                    size: indentSize,
+                    baseIndent,
+                    fieldIndent
+                };
+            }
+
+            // 检查是否是字段行
+            if (lineText.match(/^\s*\w+\s*:/)) {
+                outputChannel.appendLine('检测到字段行');
+                const fieldIndent = indent;
+
+                // 向上查找变量初始化行来获取基础缩进
+                let baseIndent = '';
+                for (let i = currentLine - 1; i >= 0; i--) {
+                    const prevLine = document.lineAt(i).text;
+                    if (prevLine.match(/^\s*[\w\.]+\s*(?::=|=|:)\s*(?:&?[\w\.]+|\[\]|map\[string\])/)) {
+                        const baseIndentMatch = prevLine.match(/^(\s*)/);
+                        baseIndent = baseIndentMatch ? baseIndentMatch[1] : '';
+                        break;
+                    }
+                }
+
+                return {
+                    type: useTabs ? 'tab' : 'space',
+                    size: indentSize,
+                    baseIndent,
+                    fieldIndent
+                };
+            }
+        }
+        currentLine--;
+    }
+
+    // 如果没有找到合适的行，使用默认缩进
+    outputChannel.appendLine('未找到合适的行，使用默认缩进');
+    return {
+        type: 'tab',
+        size: 1,
+        baseIndent: '',
+        fieldIndent: '\t'
+    };
 }
 
