@@ -153,64 +153,51 @@ export function activate(context: vscode.ExtensionContext) {
                 return;
             }
 
-            // 直接使用 gopls 的 API 获取的 completionItems
-            const fields: GoField[] = [];
-            for (const item of completionItems.items) {
-                outputChannel.appendLine(`处理补全项: ${JSON.stringify(item, null, 2)}`);
-                if (item.kind != vscode.CompletionItemKind.Field) {
-                    continue;
-                }
-                const fieldName = typeof item.label === 'string' ? item.label : item.label.label;
-                if (fieldName.includes('.')) {
-                    continue;
-                }
+            // 解析当前结构体中已有的字段
+            const existingFields = parseExistingStructFields(document, position, outputChannel);
 
-                if (checkFieldExistsInCurrentStruct(document, position, fieldName)) {
-                    outputChannel.appendLine(`字段已存在于当前结构体中，跳过: ${fieldName}`);
-                    continue;
-                }
+            // 使用新的有序字段生成逻辑
+            const { code: orderedFieldsCode, addedFields } = await generateOrderedFieldsCode(
+                structName,
+                completionItems,
+                existingFields,
+                outputChannel,
+                matchType
+            );
 
-                const fieldType = item.detail || '';
-                const isPointer = fieldType.startsWith('*');
-                const isOptional = fieldType.endsWith('?');
-
-                // 添加字段
-                fields.push({
-                    name: fieldName,
-                    type: fieldType,
-                    isPointer: isPointer,
-                    isOptional: isOptional
-                });
+            if (!orderedFieldsCode) {
+                outputChannel.appendLine('没有生成任何字段代码');
+                vscode.window.showErrorMessage('无法生成结构体字段代码');
+                return;
             }
 
-            if (fields.length === 0) {
-                outputChannel.appendLine('没有需要填充的字段');
+            if (addedFields.length === 0) {
+                outputChannel.appendLine('没有需要填充的新字段');
                 vscode.window.showInformationMessage('结构体字段已全部填充');
                 return;
             }
 
-            outputChannel.appendLine(`需要填充的字段: ${JSON.stringify(fields, null, 2)}`);
+            outputChannel.appendLine(`新添加的字段: [${addedFields.join(', ')}]`);
+            outputChannel.appendLine(`最终生成的有序代码:\n${orderedFieldsCode}`);
 
-            // 生成字段填充代码
-            const fillCode = generateFillCode(fields, outputChannel, matchType);
-            outputChannel.appendLine(`最终生成的代码: ${fillCode}`);
-
-            // 如果生成了代码，则插入
-            if (fillCode) {
-                await editor.edit(editBuilder => {
-                    // 计算插入位置
+            // 替换整个结构体内容而不是简单追加
+            await editor.edit(editBuilder => {
+                const replaceRange = calculateStructContentRange(document, position, outputChannel);
+                if (replaceRange) {
+                    // 替换整个结构体内容
+                    editBuilder.replace(replaceRange, orderedFieldsCode);
+                    outputChannel.appendLine(`已替换结构体内容，范围: ${replaceRange.start.line}:${replaceRange.start.character} - ${replaceRange.end.line}:${replaceRange.end.character}`);
+                } else {
+                    // 如果无法确定替换范围，使用插入模式（兼容性处理）
                     const insertPosition = calculateInsertPosition(document, position, matchType, outputChannel);
+                    editBuilder.insert(insertPosition, '\n' + orderedFieldsCode);
+                    outputChannel.appendLine(`已在 ${insertPosition.line}:${insertPosition.character} 插入代码（兼容模式）`);
+                }
+            });
 
-                    // 插入生成的代码
-                    editBuilder.insert(insertPosition, fillCode);
-                    outputChannel.appendLine(`已在 ${insertPosition.line}:${insertPosition.character} 插入代码`);
-                });
-                outputChannel.appendLine('结构体字段填充完成');
-                vscode.window.showInformationMessage('结构体字段填充完成');
-            } else {
-                outputChannel.appendLine('没有需要填充的字段');
-                vscode.window.showInformationMessage('没有需要填充的字段');
-            }
+            const message = `已按结构体定义顺序填充 ${addedFields.length} 个字段: ${addedFields.join(', ')}`;
+            outputChannel.appendLine('结构体字段按顺序填充完成');
+            vscode.window.showInformationMessage(message);
         } catch (error) {
             outputChannel.appendLine(`错误类型: ${typeof error}`);
             outputChannel.appendLine(`错误: ${error}`);
@@ -824,6 +811,164 @@ function calculateInsertPosition(
 }
 
 /**
+ * 计算需要替换的结构体内容范围（大括号内的所有内容）
+ * 这个函数会精确地找到当前光标所在结构体的大括号内容，确保完全替换，避免字段重复
+ */
+function calculateStructContentRange(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    outputChannel: vscode.OutputChannel
+): vscode.Range | null {
+    try {
+        outputChannel.appendLine(`计算结构体内容替换范围，当前位置: ${position.line}:${position.character}`);
+
+        // 使用更精确的算法来找到当前光标所在结构体的开大括号和闭大括号
+        let openBracePos: vscode.Position | null = null;
+        let closeBracePos: vscode.Position | null = null;
+
+        // 第1步：向上查找最近的开大括号
+        for (let lineNum = position.line; lineNum >= 0; lineNum--) {
+            const lineText = document.lineAt(lineNum).text;
+
+            if (lineNum === position.line) {
+                // 在当前行中，只查找光标位置之前的大括号
+                for (let charPos = Math.min(position.character, lineText.length - 1); charPos >= 0; charPos--) {
+                    if (lineText[charPos] === '{') {
+                        openBracePos = new vscode.Position(lineNum, charPos);
+                        break;
+                    }
+                }
+            } else {
+                // 在其他行中，查找最后一个开大括号
+                const braceIndex = lineText.lastIndexOf('{');
+                if (braceIndex !== -1) {
+                    openBracePos = new vscode.Position(lineNum, braceIndex);
+                    break;
+                }
+            }
+        }
+
+        if (!openBracePos) {
+            outputChannel.appendLine('未找到开大括号');
+            return null;
+        }
+
+        outputChannel.appendLine(`找到开大括号位置: ${openBracePos.line}:${openBracePos.character}`);
+
+        // 第2步：从开大括号位置开始，向下查找匹配的闭大括号
+        let braceCount = 0;
+        let found = false;
+
+        for (let lineNum = openBracePos.line; lineNum < document.lineCount && !found; lineNum++) {
+            const lineText = document.lineAt(lineNum).text;
+
+            // 确定在当前行中开始查找的位置
+            let startPos = 0;
+            if (lineNum === openBracePos.line) {
+                startPos = openBracePos.character; // 从开大括号位置开始
+            }
+
+            for (let charPos = startPos; charPos < lineText.length; charPos++) {
+                const char = lineText[charPos];
+
+                if (char === '{') {
+                    braceCount++;
+                } else if (char === '}') {
+                    braceCount--;
+
+                    // 当计数为0时，找到了匹配的闭大括号
+                    if (braceCount === 0) {
+                        closeBracePos = new vscode.Position(lineNum, charPos);
+                        found = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!closeBracePos) {
+            outputChannel.appendLine('未找到匹配的闭大括号');
+            return null;
+        }
+
+        outputChannel.appendLine(`找到闭大括号位置: ${closeBracePos.line}:${closeBracePos.character}`);
+
+        // 第3步：计算需要替换的精确范围，避免多余的空行
+        let replaceStart: vscode.Position;
+        let replaceEnd: vscode.Position;
+
+        // 计算开始位置：寻找第一个有内容的行或者开大括号后的位置
+        const openBraceLine = document.lineAt(openBracePos.line);
+        const textAfterOpenBrace = openBraceLine.text.substring(openBracePos.character + 1).trim();
+
+        if (textAfterOpenBrace === '') {
+            // 开大括号后是空的，寻找第一个有内容的行
+            let firstContentLine = openBracePos.line + 1;
+            while (firstContentLine < closeBracePos.line) {
+                const lineText = document.lineAt(firstContentLine).text.trim();
+                if (lineText !== '') {
+                    break;
+                }
+                firstContentLine++;
+            }
+
+            if (firstContentLine < closeBracePos.line) {
+                // 找到了有内容的行，从该行开始
+                replaceStart = new vscode.Position(firstContentLine, 0);
+            } else {
+                // 没有找到内容行，从开大括号后开始
+                replaceStart = new vscode.Position(openBracePos.line, openBracePos.character + 1);
+            }
+        } else {
+            // 开大括号后有内容，从开大括号后开始
+            replaceStart = new vscode.Position(openBracePos.line, openBracePos.character + 1);
+        }
+
+        // 计算结束位置：寻找最后一个有内容的行或者闭大括号前的位置
+        const closeBraceLine = document.lineAt(closeBracePos.line);
+        const textBeforeCloseBrace = closeBraceLine.text.substring(0, closeBracePos.character).trim();
+
+        if (textBeforeCloseBrace === '') {
+            // 闭大括号前是空的，寻找最后一个有内容的行
+            let lastContentLine = closeBracePos.line - 1;
+            while (lastContentLine > openBracePos.line) {
+                const lineText = document.lineAt(lastContentLine).text.trim();
+                if (lineText !== '') {
+                    break;
+                }
+                lastContentLine--;
+            }
+
+            if (lastContentLine > openBracePos.line) {
+                // 找到了有内容的行，到该行末尾
+                const lastContentLineText = document.lineAt(lastContentLine).text;
+                replaceEnd = new vscode.Position(lastContentLine, lastContentLineText.length);
+            } else {
+                // 没有找到内容行，到闭大括号前
+                replaceEnd = new vscode.Position(closeBracePos.line, closeBracePos.character);
+            }
+        } else {
+            // 闭大括号前有内容，到闭大括号前
+            replaceEnd = new vscode.Position(closeBracePos.line, closeBracePos.character);
+        }
+
+        const replaceRange = new vscode.Range(replaceStart, replaceEnd);
+
+        outputChannel.appendLine(`计算出的精确替换范围: ${replaceRange.start.line}:${replaceRange.start.character} - ${replaceRange.end.line}:${replaceRange.end.character}`);
+
+        // 输出要替换的内容用于调试
+        const currentContent = document.getText(replaceRange);
+        outputChannel.appendLine(`当前要替换的内容:\n"${currentContent}"`);
+
+        return replaceRange;
+
+    } catch (error) {
+        outputChannel.appendLine(`计算结构体内容范围时出错: ${error}`);
+        return null;
+    }
+}
+
+/**
  * 生成结构体字段填充代码
  * @param fields 结构体字段列表
  * @param outputChannel 输出通道
@@ -1094,37 +1239,51 @@ function checkFieldExistsInCurrentStruct(
 function getCurrentStructRange(document: vscode.TextDocument, position: vscode.Position): vscode.Range | null {
     let startLine = position.line;
     let endLine = position.line;
+    let braceCount = 0;
+    let foundOpenBrace = false;
 
-    // 向上查找结构体开始位置
+    // 向上查找结构体开始位置（包含左大括号的行）
     while (startLine >= 0) {
         const lineText = document.lineAt(startLine).text;
         if (lineText.includes('{')) {
+            foundOpenBrace = true;
             break;
         }
         startLine--;
     }
 
-    // 向下查找结构体结束位置
-    let braceCount = 0;
+    if (!foundOpenBrace || startLine < 0) {
+        return null;
+    }
+
+    // 从找到左大括号的行开始，向下查找匹配的右大括号
+    endLine = startLine;
+    braceCount = 0;
+
     while (endLine < document.lineCount) {
         const lineText = document.lineAt(endLine).text;
-        for (const char of lineText) {
-            if (char === '{') braceCount++;
-            if (char === '}') braceCount--;
+
+        for (let i = 0; i < lineText.length; i++) {
+            const char = lineText[i];
+            if (char === '{') {
+                braceCount++;
+            } else if (char === '}') {
+                braceCount--;
+                // 当大括号计数归零时，找到了匹配的结束大括号
+                if (braceCount === 0) {
+                    return new vscode.Range(
+                        new vscode.Position(startLine, 0),
+                        new vscode.Position(endLine, lineText.length)
+                    );
+                }
+            }
         }
-        if (braceCount === 0) break;
         endLine++;
     }
 
-    if (startLine < 0 || endLine >= document.lineCount) return null;
-
-    return new vscode.Range(
-        new vscode.Position(startLine, 0),
-        new vscode.Position(endLine, document.lineAt(endLine).text.length)
-    );
+    // 如果没有找到匹配的右大括号，返回null
+    return null;
 }
-
-
 
 /**
  * 在当前文档中寻找最佳的补全位置
@@ -1191,5 +1350,534 @@ function findOptimalCompletionPosition(
     // 如果没有找到特殊位置，返回当前位置
     outputChannel.appendLine('未找到特殊的补全位置，使用当前光标位置');
     return null;
+}
+
+/**
+ * 解析当前结构体中已有的字段和值
+ * 支持复杂的嵌套结构体值解析
+ */
+function parseExistingStructFields(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    outputChannel: vscode.OutputChannel
+): Map<string, string> {
+    const existingFields = new Map<string, string>();
+
+    try {
+        // 获取当前结构体的范围
+        const structRange = getCurrentStructRange(document, position);
+        if (!structRange) {
+            outputChannel.appendLine('无法确定当前结构体范围');
+            return existingFields;
+        }
+
+        // 获取结构体内容
+        const structText = document.getText(structRange);
+        outputChannel.appendLine(`当前结构体内容:\n${structText}`);
+
+        // 使用更智能的算法来解析字段，支持嵌套结构体
+        const fields = parseStructFieldsWithComplexValues(structText, outputChannel);
+
+        for (const [fieldName, fieldValue] of fields) {
+            existingFields.set(fieldName, fieldValue);
+            outputChannel.appendLine(`解析到已有字段: ${fieldName} = ${fieldValue}`);
+        }
+
+        outputChannel.appendLine(`总共解析到 ${existingFields.size} 个已有字段`);
+    } catch (error) {
+        outputChannel.appendLine(`解析已有字段时出错: ${error}`);
+    }
+
+    return existingFields;
+}
+
+/**
+ * 解析包含复杂值（如嵌套结构体）的结构体字段
+ */
+function parseStructFieldsWithComplexValues(
+    structText: string,
+    outputChannel: vscode.OutputChannel
+): Map<string, string> {
+    const fields = new Map<string, string>();
+
+    // 移除开头和结尾的大括号，只处理内容
+    const cleanText = structText.trim();
+    let content = cleanText;
+
+    // 找到第一个 { 和最后一个 }，提取中间内容
+    const firstBraceIndex = content.indexOf('{');
+    const lastBraceIndex = content.lastIndexOf('}');
+
+    if (firstBraceIndex !== -1 && lastBraceIndex !== -1 && firstBraceIndex < lastBraceIndex) {
+        content = content.substring(firstBraceIndex + 1, lastBraceIndex).trim();
+    }
+
+    outputChannel.appendLine(`提取的字段内容: "${content}"`);
+
+    if (!content) {
+        return fields;
+    }
+
+    // 使用状态机来解析字段
+    let i = 0;
+    const textLength = content.length;
+
+    while (i < textLength) {
+        // 跳过空白字符和注释
+        while (i < textLength && (content[i] === ' ' || content[i] === '\t' || content[i] === '\n' || content[i] === '\r')) {
+            i++;
+        }
+
+        if (i >= textLength) break;
+
+        // 跳过注释行
+        if (content.substring(i, i + 2) === '//') {
+            while (i < textLength && content[i] !== '\n') {
+                i++;
+            }
+            continue;
+        }
+
+        // 查找字段名（标识符）
+        const fieldNameStart = i;
+        while (i < textLength && /\w/.test(content[i])) {
+            i++;
+        }
+
+        if (i === fieldNameStart) {
+            // 没找到有效的字段名，跳过当前字符
+            i++;
+            continue;
+        }
+
+        const fieldName = content.substring(fieldNameStart, i).trim();
+
+        // 跳过空白字符
+        while (i < textLength && /\s/.test(content[i])) {
+            i++;
+        }
+
+        // 检查是否有冒号
+        if (i >= textLength || content[i] !== ':') {
+            continue;
+        }
+
+        i++; // 跳过冒号
+
+        // 跳过冒号后的空白字符
+        while (i < textLength && /\s/.test(content[i])) {
+            i++;
+        }
+
+        // 解析字段值（这是关键部分）
+        const fieldValue = parseFieldValue(content, i, outputChannel);
+
+        if (fieldValue.value) {
+            fields.set(fieldName, fieldValue.value);
+            outputChannel.appendLine(`字段解析成功: ${fieldName} = "${fieldValue.value}"`);
+        }
+
+        i = fieldValue.nextIndex;
+
+        // 跳过可能的逗号
+        while (i < textLength && (content[i] === ',' || /\s/.test(content[i]))) {
+            i++;
+        }
+    }
+
+    return fields;
+}
+
+/**
+ * 解析字段值，支持嵌套结构体、字符串、数字等复杂类型
+ */
+function parseFieldValue(
+    content: string,
+    startIndex: number,
+    outputChannel: vscode.OutputChannel
+): { value: string, nextIndex: number } {
+    let i = startIndex;
+    const textLength = content.length;
+    let braceCount = 0;
+    let inString = false;
+    let stringChar = '';
+    const valueStart = i;
+
+    outputChannel.appendLine(`开始解析字段值，起始位置: ${startIndex}`);
+
+    while (i < textLength) {
+        const char = content[i];
+
+        // 处理字符串
+        if (!inString && (char === '"' || char === '`' || char === "'")) {
+            inString = true;
+            stringChar = char;
+        } else if (inString && char === stringChar && content[i - 1] !== '\\') {
+            inString = false;
+            stringChar = '';
+        }
+
+        // 如果在字符串内，跳过所有特殊字符处理
+        if (inString) {
+            i++;
+            continue;
+        }
+
+        // 处理大括号
+        if (char === '{') {
+            braceCount++;
+        } else if (char === '}') {
+            braceCount--;
+        } else if (char === ',' && braceCount === 0) {
+            // 遇到逗号且不在嵌套结构体内，字段值结束
+            break;
+        } else if (char === '\n' && braceCount === 0) {
+            // 遇到换行符且不在嵌套结构体内，检查下一行是否是新字段
+            let j = i + 1;
+            // 跳过空白字符
+            while (j < textLength && /\s/.test(content[j]) && content[j] !== '\n') {
+                j++;
+            }
+
+            // 如果下一个非空白字符是字母（可能是字段名），则当前字段值结束
+            if (j < textLength && /[a-zA-Z]/.test(content[j])) {
+                // 检查这是否真的是一个字段（后面跟着冒号）
+                let k = j;
+                while (k < textLength && /\w/.test(content[k])) {
+                    k++;
+                }
+                // 跳过空白
+                while (k < textLength && /\s/.test(content[k])) {
+                    k++;
+                }
+                if (k < textLength && content[k] === ':') {
+                    // 确实是新字段，当前字段值结束
+                    break;
+                }
+            }
+        }
+
+        i++;
+    }
+
+    const value = content.substring(valueStart, i).trim();
+
+    // 移除末尾的逗号（如果有的话）
+    const cleanValue = value.replace(/,\s*$/, '').trim();
+
+    outputChannel.appendLine(`解析到字段值: "${cleanValue}", 下一个位置: ${i}`);
+
+    return {
+        value: cleanValue,
+        nextIndex: i
+    };
+}
+
+/**
+ * 根据补全项获取结构体字段的完整顺序
+ */
+function getStructFieldOrder(completionItems: vscode.CompletionList, outputChannel: vscode.OutputChannel): string[] {
+    const fieldOrder: string[] = [];
+
+    for (const item of completionItems.items) {
+        if (item.kind === vscode.CompletionItemKind.Field) {
+            const fieldName = typeof item.label === 'string' ? item.label : item.label.label;
+            if (!fieldName.includes('.')) {
+                fieldOrder.push(fieldName);
+            }
+        }
+    }
+
+    outputChannel.appendLine(`结构体字段定义顺序: [${fieldOrder.join(', ')}]`);
+    return fieldOrder;
+}
+
+/**
+ * 生成按照定义顺序排列的完整结构体字段代码
+ */
+async function generateOrderedFieldsCode(
+    structName: string,
+    completionItems: vscode.CompletionList,
+    existingFields: Map<string, string>,
+    outputChannel: vscode.OutputChannel,
+    matchType: string
+): Promise<{ code: string, addedFields: string[] }> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+        return { code: '', addedFields: [] };
+    }
+
+    const document = editor.document;
+    const position = editor.selection.active;
+
+    // 使用新的函数获取正确的字段定义顺序
+    let fieldDefinitions = await getStructFieldDefinitionOrder(structName, document, outputChannel);
+    const addedFields: string[] = [];
+
+    if (fieldDefinitions.length === 0) {
+        outputChannel.appendLine('没有找到结构体字段定义顺序，尝试使用补全项顺序');
+        // 如果获取不到定义，回退到补全项顺序
+        const fieldOrder = getStructFieldOrder(completionItems, outputChannel);
+        if (fieldOrder.length === 0) {
+            return { code: '', addedFields: [] };
+        }
+
+        // 将补全项转换为字段定义格式
+        fieldDefinitions = fieldOrder.map(name => {
+            const fieldItem = completionItems.items.find(item => {
+                const itemLabel = typeof item.label === 'string' ? item.label : item.label.label;
+                return item.kind === vscode.CompletionItemKind.Field && itemLabel === name;
+            });
+
+            return {
+                name,
+                type: fieldItem?.detail || 'interface{}'
+            };
+        });
+    }
+
+    // 计算正确的缩进
+    const indentInfo = calculateProperIndent(document, position, outputChannel);
+    const { fieldIndent } = indentInfo;
+
+    outputChannel.appendLine(`使用的字段缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
+
+    // 按照定义顺序生成字段代码
+    const fieldLines: string[] = [];
+
+    for (const fieldDef of fieldDefinitions) {
+        const fieldName = fieldDef.name;
+        let fieldValue: string;
+
+        if (existingFields.has(fieldName)) {
+            // 使用已有值
+            fieldValue = existingFields.get(fieldName)!;
+            outputChannel.appendLine(`保留已有字段: ${fieldName} = ${fieldValue}`);
+        } else {
+            // 使用定义中的类型信息或从补全项中查找
+            let fieldType = fieldDef.type;
+
+            // 尝试从补全项中获取更详细的类型信息
+            const fieldItem = completionItems.items.find(item => {
+                const itemLabel = typeof item.label === 'string' ? item.label : item.label.label;
+                return item.kind === vscode.CompletionItemKind.Field && itemLabel === fieldName;
+            });
+
+            if (fieldItem && fieldItem.detail) {
+                fieldType = fieldItem.detail;
+            }
+
+            fieldValue = getDefaultValueByType(fieldType);
+            addedFields.push(fieldName);
+            outputChannel.appendLine(`添加新字段: ${fieldName} = ${fieldValue} (类型: ${fieldType})`);
+        }
+
+        fieldLines.push(`${fieldIndent}${fieldName}: ${fieldValue},`);
+    }
+
+    // 生成字段代码，不添加多余的换行符
+    let code = '';
+    if (fieldLines.length > 0) {
+        code = fieldLines.join('\n');
+    }
+
+    outputChannel.appendLine(`生成的有序字段代码:\n"${code}"`);
+    outputChannel.appendLine(`新添加的字段: [${addedFields.join(', ')}]`);
+
+    return { code, addedFields };
+}
+
+/**
+ * 计算正确的缩进信息
+ */
+function calculateProperIndent(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    outputChannel: vscode.OutputChannel
+): { baseIndent: string, fieldIndent: string } {
+
+    // 获取当前结构体的范围来分析缩进模式
+    const structRange = getCurrentStructRange(document, position);
+    if (!structRange) {
+        // 如果无法确定结构体范围，使用默认缩进
+        return { baseIndent: '', fieldIndent: '\t' };
+    }
+
+    // 查找包含开大括号的行
+    let braceLineIndent = '';
+    for (let lineNum = structRange.start.line; lineNum <= structRange.end.line; lineNum++) {
+        const lineText = document.lineAt(lineNum).text;
+        if (lineText.includes('{')) {
+            const indentMatch = lineText.match(/^(\s*)/);
+            braceLineIndent = indentMatch ? indentMatch[1] : '';
+            outputChannel.appendLine(`找到大括号行 ${lineNum}: '${lineText}'`);
+            outputChannel.appendLine(`大括号行缩进: '${braceLineIndent}' (长度: ${braceLineIndent.length})`);
+            break;
+        }
+    }
+
+    // 分析现有字段的缩进模式
+    let existingFieldIndent = '';
+    const structText = document.getText(structRange);
+    const fieldLines = structText.split('\n').filter(line => {
+        const trimmed = line.trim();
+        return trimmed.includes(':') && !trimmed.startsWith('//');
+    });
+
+    if (fieldLines.length > 0) {
+        // 使用现有字段的缩进模式
+        const firstFieldLine = fieldLines[0];
+        const indentMatch = firstFieldLine.match(/^(\s*)/);
+        existingFieldIndent = indentMatch ? indentMatch[1] : '';
+        outputChannel.appendLine(`现有字段缩进: '${existingFieldIndent}' (长度: ${existingFieldIndent.length})`);
+    } else {
+        // 如果没有现有字段，使用大括号缩进 + tab
+        existingFieldIndent = braceLineIndent + '\t';
+        outputChannel.appendLine(`没有现有字段，使用计算的缩进: '${existingFieldIndent}' (长度: ${existingFieldIndent.length})`);
+    }
+
+    return {
+        baseIndent: braceLineIndent,
+        fieldIndent: existingFieldIndent
+    };
+}
+
+/**
+ * 根据字段类型获取默认值
+ */
+function getDefaultValueByType(fieldType: string): string {
+    // 如果是指针类型，返回 nil
+    if (fieldType.startsWith('*')) {
+        return 'nil';
+    }
+
+    // 处理基本类型
+    const type = fieldType.replace('*', '').toLowerCase();
+    switch (type) {
+        case 'string':
+            return '""';
+        case 'int':
+        case 'int32':
+        case 'int64':
+        case 'uint':
+        case 'uint32':
+        case 'uint64':
+            return '0';
+        case 'float32':
+        case 'float64':
+            return '0.0';
+        case 'bool':
+            return 'false';
+        default:
+            // 处理数组类型
+            if (type.includes('[') && type.includes(']')) {
+                return 'nil';
+            }
+            // 处理其他类型（结构体等）
+            if (fieldType) {
+                return `${fieldType}{}`;
+            }
+            return '""';
+    }
+}
+
+/**
+ * 直接从结构体定义中获取字段的正确顺序
+ * 这比依赖补全项顺序更可靠
+ */
+async function getStructFieldDefinitionOrder(
+    structName: string,
+    document: vscode.TextDocument,
+    outputChannel: vscode.OutputChannel
+): Promise<Array<{ name: string, type: string }>> {
+    outputChannel.appendLine(`开始获取结构体 ${structName} 的定义顺序`);
+
+    try {
+        // 首先在当前文件中查找结构体定义
+        const currentFileText = document.getText();
+        const structRegex = new RegExp(`type\\s+${structName}\\s+struct\\s*{([^}]+)}`, 's');
+        let match = structRegex.exec(currentFileText);
+
+        if (match) {
+            outputChannel.appendLine(`在当前文件中找到结构体定义: ${structName}`);
+            return parseStructFieldsFromDefinition(match[1], outputChannel);
+        }
+
+        // 如果当前文件没有，搜索工作区的所有.go文件
+        const goFiles = await vscode.workspace.findFiles('**/*.go', null, 50);
+
+        for (const file of goFiles) {
+            if (file.fsPath === document.uri.fsPath) {
+                continue; // 跳过当前文件，已经搜索过了
+            }
+
+            try {
+                const fileDoc = await vscode.workspace.openTextDocument(file);
+                const fileText = fileDoc.getText();
+
+                const match = structRegex.exec(fileText);
+                if (match) {
+                    outputChannel.appendLine(`在文件 ${file.fsPath} 中找到结构体定义: ${structName}`);
+                    return parseStructFieldsFromDefinition(match[1], outputChannel);
+                }
+            } catch (error) {
+                // 忽略单个文件的错误，继续搜索
+                outputChannel.appendLine(`搜索文件 ${file.fsPath} 时出错: ${error}`);
+            }
+        }
+
+        outputChannel.appendLine(`未找到结构体 ${structName} 的定义`);
+        return [];
+
+    } catch (error) {
+        outputChannel.appendLine(`获取结构体定义时出错: ${error}`);
+        return [];
+    }
+}
+
+/**
+ * 解析结构体字段定义文本，提取字段名称和类型，保持原始顺序
+ */
+function parseStructFieldsFromDefinition(
+    fieldsText: string,
+    outputChannel: vscode.OutputChannel
+): Array<{ name: string, type: string }> {
+    const fields: Array<{ name: string, type: string }> = [];
+
+    // 清理文本，移除多余的空白和注释
+    const cleanText = fieldsText
+        .replace(/\/\/.*$/gm, '') // 移除行注释
+        .replace(/\/\*[\s\S]*?\*\//g, '') // 移除块注释
+        .trim();
+
+    outputChannel.appendLine(`解析结构体字段文本:\n${cleanText}`);
+
+    // 按行分割并解析每个字段
+    const lines = cleanText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+    for (const line of lines) {
+        // 匹配字段定义：FieldName Type `tags`
+        // 支持多种格式：
+        // 1. Name string `json:"name"`
+        // 2. Age int
+        // 3. Items []Item
+        // 4. Map map[string]int
+        const fieldMatch = line.match(/^(\w+)\s+([^\s`]+)/);
+
+        if (fieldMatch) {
+            const fieldName = fieldMatch[1];
+            const fieldType = fieldMatch[2];
+
+            fields.push({
+                name: fieldName,
+                type: fieldType
+            });
+
+            outputChannel.appendLine(`解析到字段: ${fieldName} (类型: ${fieldType})`);
+        }
+    }
+
+    outputChannel.appendLine(`总共解析到 ${fields.length} 个字段，顺序: [${fields.map(f => f.name).join(', ')}]`);
+    return fields;
 }
 
