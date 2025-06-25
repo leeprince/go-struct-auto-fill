@@ -24,15 +24,19 @@ func TestPackage(t *testing.T) {
 	fmt.Println("userLocal:", userLocal)
 
 	userInfo := &user.User{
-		Name:  "",
-		Email: "",
+		Id:       0,
+		Name:     "",
+		Email:    "",
+		IsActive: 0,
 	}
 
 	fmt.Println("userInfo:", userInfo)
 
 	var userVar = user.User{
-		Name: "",
+		Id:       0,
+		Name:     "",
+		Email:    "",
+		IsActive: 0,
 	}
-
 	fmt.Println("userVar:", userVar)
 }

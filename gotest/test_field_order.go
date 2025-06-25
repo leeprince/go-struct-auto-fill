@@ -62,7 +62,7 @@ func TestFieldOrder(t *testing.T) {
 		"admin": User1{
 			Name:    "",
 			Age:     0,
-			Address: "",
+			Address: "1",
 		},
 	}
 

@@ -142,14 +142,73 @@ function identifyStructInitialization(document, position, outputChannel) {
     const currentLine = document.lineAt(position.line);
     const currentLineText = currentLine.text;
     outputChannel.appendLine(`开始识别结构体初始化，当前行: ${currentLineText}`);
-    // 获取光标前的文本内容，用于更准确的匹配
-    const textBeforeCursor = document.getText(new vscode.Range(new vscode.Position(Math.max(0, position.line - 20), 0), position));
-    outputChannel.appendLine(`光标前文本: ${textBeforeCursor}`);
-    // 新的通用结构体上下文分析
-    const contextResult = analyzeStructContext(document, position, outputChannel);
-    if (contextResult) {
-        return contextResult;
+    // 简化逻辑：直接从当前光标位置向上查找结构体声明
+    const structResult = findStructDeclarationSimple(document, position, outputChannel);
+    if (structResult) {
+        return structResult;
     }
+    return null;
+}
+/**
+ * 简化的结构体声明查找函数
+ * 直接查找常见的结构体初始化模式
+ */
+function findStructDeclarationSimple(document, position, outputChannel) {
+    outputChannel.appendLine(`开始简化的结构体声明查找，光标位置: ${position.line}:${position.character}`);
+    // 从当前行开始向上查找，最多查找10行
+    for (let lineNum = position.line; lineNum >= Math.max(0, position.line - 10); lineNum--) {
+        const lineText = document.lineAt(lineNum).text;
+        outputChannel.appendLine(`检查行 ${lineNum}: "${lineText}"`);
+        // 查找结构体初始化模式，支持包名
+        const patterns = [
+            // 1. 变量赋值：var xxx = StructName{ 或 var xxx = pkg.StructName{
+            /var\s+(\w+)\s*=\s*&?([\w\.]+)\s*\{/,
+            // 2. 短变量声明：xxx := StructName{ 或 xxx := pkg.StructName{
+            /(\w+)\s*:=\s*&?([\w\.]+)\s*\{/,
+            // 3. 直接初始化：StructName{ 或 pkg.StructName{
+            /\b([\w\.]+)\s*\{/,
+            // 4. 函数参数、数组元素等：, StructName{ 或 , pkg.StructName{
+            /,\s*([\w\.]+)\s*\{/,
+            // 5. 开头的结构体：^空白StructName{ 或 ^空白pkg.StructName{
+            /^\s*([\w\.]+)\s*\{/
+        ];
+        for (const pattern of patterns) {
+            const match = lineText.match(pattern);
+            if (match) {
+                // 获取结构体名称（最后一个捕获组通常是结构体名）
+                let structName = '';
+                for (let i = match.length - 1; i >= 1; i--) {
+                    if (match[i] && /^[\w\.]+$/.test(match[i]) && match[i].includes('.') || /^[A-Z]/.test(match[i])) {
+                        structName = match[i];
+                        break;
+                    }
+                }
+                if (structName) {
+                    outputChannel.appendLine(`找到结构体初始化: ${structName} (模式: ${pattern})`);
+                    // 确定匹配类型
+                    let matchType = 'variable';
+                    if (lineText.includes('[]')) {
+                        matchType = 'array';
+                    }
+                    else if (lineText.includes('map[')) {
+                        matchType = 'map';
+                    }
+                    else if (lineText.includes('append(')) {
+                        matchType = 'append';
+                    }
+                    else if (lineText.includes('(') && !lineText.includes(':=') && !lineText.includes('var ')) {
+                        matchType = 'function_param';
+                    }
+                    return {
+                        structName,
+                        isNestedStruct: false,
+                        matchType
+                    };
+                }
+            }
+        }
+    }
+    outputChannel.appendLine('未找到结构体初始化声明');
     return null;
 }
 /**
@@ -1048,45 +1107,51 @@ function findOptimalCompletionPosition(document, position, structName, matchType
  */
 function parseExistingStructFields(document, position, outputChannel) {
     const fields = new Map();
-    // 首先找到结构体初始化块的范围
-    const structRange = getCurrentStructRange(document, position);
-    if (!structRange) {
-        outputChannel.appendLine('无法确定结构体初始化块范围，使用默认解析方式');
-        // 回退到原来的解析方式
-        const lines = [];
-        for (let i = Math.max(0, position.line - 2); i <= position.line + 2; i++) {
-            if (i < document.lineCount) {
-                lines.push(document.lineAt(i).text);
-            }
+    outputChannel.appendLine(`开始解析已存在字段，光标位置: ${position.line}:${position.character}`);
+    // 找到结构体初始化的开大括号和闭大括号
+    let openBraceLine = -1;
+    let closeBraceLine = -1;
+    // 向上查找开大括号
+    for (let lineNum = position.line; lineNum >= Math.max(0, position.line - 10); lineNum--) {
+        const lineText = document.lineAt(lineNum).text;
+        if (lineText.includes('{')) {
+            openBraceLine = lineNum;
+            outputChannel.appendLine(`找到开大括号行 ${lineNum}: "${lineText}"`);
+            break;
         }
-        // 查找字段行
-        for (const line of lines) {
-            const fieldMatch = line.match(/^\s*(\w+)\s*:/);
-            if (fieldMatch) {
-                const fieldName = fieldMatch[1];
-                const valueMatch = line.match(/:\s*(.+),/);
-                if (valueMatch) {
-                    fields.set(fieldName, valueMatch[1].trim());
-                }
-            }
-        }
+    }
+    if (openBraceLine === -1) {
+        outputChannel.appendLine('未找到开大括号，无法解析字段');
         return fields;
     }
-    outputChannel.appendLine(`结构体初始化块范围: ${structRange.start.line}:${structRange.start.character} - ${structRange.end.line}:${structRange.end.character}`);
-    // 解析整个结构体初始化块中的所有字段
-    for (let lineNum = structRange.start.line; lineNum <= structRange.end.line; lineNum++) {
-        const line = document.lineAt(lineNum).text;
-        // 跳过开大括号和闭大括号行
-        if (line.trim() === '{' || line.trim() === '}') {
+    // 向下查找闭大括号
+    for (let lineNum = openBraceLine; lineNum < Math.min(document.lineCount, openBraceLine + 20); lineNum++) {
+        const lineText = document.lineAt(lineNum).text;
+        if (lineText.includes('}')) {
+            closeBraceLine = lineNum;
+            outputChannel.appendLine(`找到闭大括号行 ${lineNum}: "${lineText}"`);
+            break;
+        }
+    }
+    if (closeBraceLine === -1) {
+        outputChannel.appendLine('未找到闭大括号，无法解析字段');
+        return fields;
+    }
+    // 解析开大括号和闭大括号之间的字段
+    for (let lineNum = openBraceLine; lineNum <= closeBraceLine; lineNum++) {
+        const lineText = document.lineAt(lineNum).text;
+        // 跳过包含大括号但不是字段的行
+        if (lineText.includes('{') || lineText.includes('}')) {
             continue;
         }
-        // 跳过包含变量声明的行（如 userInfo := &user.User{）
-        if (line.includes(':=') || line.includes('=') && !line.includes(':')) {
+        // 跳过注释行和空行
+        const trimmed = lineText.trim();
+        if (trimmed === '' || trimmed.startsWith('//')) {
             continue;
         }
-        // 更严格的字段行匹配：确保是有效的字段定义
-        // 字段行格式：[空白]FieldName: Value[,]
-        const fieldMatch = line.match(/^\s*([A-Z][a-zA-Z0-9]*)\s*:\s*(.+?)(?:,\s*)?$/);
+        // 匹配字段行：以大写字母开头的字段名，后跟冒号
+        // 格式：FieldName: value,
+        const fieldMatch = trimmed.match(/^([A-Z][a-zA-Z0-9]*)\s*:\s*(.+?)(?:,\s*)?$/);
         if (fieldMatch) {
             const fieldName = fieldMatch[1];
             let fieldValue = fieldMatch[2].trim();
@@ -1094,10 +1159,8 @@ function parseExistingStructFields(document, position, outputChannel) {
             if (fieldValue.endsWith(',')) {
                 fieldValue = fieldValue.slice(0, -1).trim();
             }
-            if (fieldValue) {
-                fields.set(fieldName, fieldValue);
-                outputChannel.appendLine(`解析到已存在字段: ${fieldName} = ${fieldValue}`);
-            }
+            fields.set(fieldName, fieldValue);
+            outputChannel.appendLine(`解析到字段: ${fieldName} = ${fieldValue}`);
         }
     }
     outputChannel.appendLine(`总共解析到 ${fields.size} 个已存在字段: [${Array.from(fields.keys()).join(', ')}]`);
@@ -1155,14 +1218,15 @@ async function generateOrderedFieldsCode(structName, completionItems, existingFi
     }
     const document = editor.document;
     const position = editor.selection.active;
-    // 使用新的函数获取正确的字段定义顺序
+    // 首先尝试从结构体定义获取字段顺序
     let fieldDefinitions = await getStructFieldDefinitionOrder(structName, document, outputChannel);
     const addedFields = [];
+    // 如果没有找到结构体定义，使用补全项顺序
     if (fieldDefinitions.length === 0) {
         outputChannel.appendLine('没有找到结构体字段定义顺序，尝试使用补全项顺序');
-        // 如果获取不到定义，回退到补全项顺序
         const fieldOrder = getStructFieldOrder(completionItems, outputChannel);
         if (fieldOrder.length === 0) {
+            outputChannel.appendLine('补全项中也没有找到字段');
             return { code: '', addedFields: [] };
         }
         // 将补全项转换为字段定义格式
@@ -1177,6 +1241,28 @@ async function generateOrderedFieldsCode(structName, completionItems, existingFi
             };
         });
     }
+    // 合并已存在字段和补全项中的字段，确保完整性
+    const allAvailableFields = new Set();
+    // 添加从定义中获取的字段
+    fieldDefinitions.forEach(field => allAvailableFields.add(field.name));
+    // 添加补全项中的字段
+    completionItems.items.forEach(item => {
+        if (item.kind === vscode.CompletionItemKind.Field) {
+            const fieldName = typeof item.label === 'string' ? item.label : item.label.label;
+            if (!fieldName.includes('.') && /^[A-Z]/.test(fieldName)) {
+                allAvailableFields.add(fieldName);
+                // 如果字段定义中没有这个字段，添加进去
+                if (!fieldDefinitions.find(f => f.name === fieldName)) {
+                    fieldDefinitions.push({
+                        name: fieldName,
+                        type: item.detail || 'interface{}'
+                    });
+                }
+            }
+        }
+    });
+    outputChannel.appendLine(`所有可用字段: [${Array.from(allAvailableFields).join(', ')}]`);
+    outputChannel.appendLine(`已存在字段: [${Array.from(existingFields.keys()).join(', ')}]`);
     // 计算正确的缩进
     const indentInfo = calculateProperIndent(document, position, outputChannel);
     const { fieldIndent } = indentInfo;
@@ -1187,12 +1273,12 @@ async function generateOrderedFieldsCode(structName, completionItems, existingFi
         const fieldName = fieldDef.name;
         let fieldValue;
         if (existingFields.has(fieldName)) {
-            // 使用已有值
+            // 保留已有值
             fieldValue = existingFields.get(fieldName);
             outputChannel.appendLine(`保留已有字段: ${fieldName} = ${fieldValue}`);
         }
         else {
-            // 使用定义中的类型信息或从补全项中查找
+            // 添加新字段
             let fieldType = fieldDef.type;
             // 尝试从补全项中获取更详细的类型信息
             const fieldItem = completionItems.items.find(item => {
@@ -1208,13 +1294,14 @@ async function generateOrderedFieldsCode(structName, completionItems, existingFi
         }
         fieldLines.push(`${fieldIndent}${fieldName}: ${fieldValue},`);
     }
-    // 生成字段代码，不添加多余的换行符
+    // 生成字段代码
     let code = '';
     if (fieldLines.length > 0) {
         code = fieldLines.join('\n');
     }
-    outputChannel.appendLine(`生成的有序字段代码:\n"${code}"`);
+    outputChannel.appendLine(`生成的完整有序字段代码:\n"${code}"`);
     outputChannel.appendLine(`新添加的字段: [${addedFields.join(', ')}]`);
+    outputChannel.appendLine(`保留的已存在字段: [${Array.from(existingFields.keys()).join(', ')}]`);
     return { code, addedFields };
 }
 /**
@@ -1382,37 +1469,65 @@ function getDefaultValueByType(fieldType) {
 }
 /**
  * 直接从结构体定义中获取字段的正确顺序
- * 这比依赖补全项顺序更可靠
+ * 支持包名的结构体查找
  */
 async function getStructFieldDefinitionOrder(structName, document, outputChannel) {
     outputChannel.appendLine(`开始获取结构体 ${structName} 的定义顺序`);
     try {
-        // 首先在当前文件中查找结构体定义
-        const currentFileText = document.getText();
-        const structRegex = new RegExp(`type\\s+${structName}\\s+struct\\s*{([^}]+)}`, 's');
-        let match = structRegex.exec(currentFileText);
-        if (match) {
-            outputChannel.appendLine(`在当前文件中找到结构体定义: ${structName}`);
-            return parseStructFieldsFromDefinition(match[1], outputChannel);
-        }
-        // 如果当前文件没有，搜索工作区的所有.go文件
-        const goFiles = await vscode.workspace.findFiles('**/*.go', null, 50);
-        for (const file of goFiles) {
-            if (file.fsPath === document.uri.fsPath) {
-                continue; // 跳过当前文件，已经搜索过了
-            }
-            try {
-                const fileDoc = await vscode.workspace.openTextDocument(file);
-                const fileText = fileDoc.getText();
-                const match = structRegex.exec(fileText);
-                if (match) {
-                    outputChannel.appendLine(`在文件 ${file.fsPath} 中找到结构体定义: ${structName}`);
-                    return parseStructFieldsFromDefinition(match[1], outputChannel);
+        // 解析结构体名称，支持包名
+        const { pkgName, structName: structNameOnly } = parseFullStructName(structName);
+        outputChannel.appendLine(`解析结构体名称: 包名=${pkgName}, 结构体名=${structNameOnly}`);
+        // 如果是包名.结构体名的格式，需要在对应的包中查找
+        if (pkgName) {
+            // 查找工作区中匹配包名的文件
+            const searchPattern = `**/${pkgName}/**/*.go`;
+            outputChannel.appendLine(`搜索模式: ${searchPattern}`);
+            const goFiles = await vscode.workspace.findFiles(searchPattern, null, 50);
+            outputChannel.appendLine(`找到 ${goFiles.length} 个相关文件`);
+            for (const file of goFiles) {
+                try {
+                    const fileDoc = await vscode.workspace.openTextDocument(file);
+                    const fileText = fileDoc.getText();
+                    // 查找结构体定义
+                    const structRegex = new RegExp(`type\\s+${structNameOnly}\\s+struct\\s*{([^}]+)}`, 's');
+                    const match = structRegex.exec(fileText);
+                    if (match) {
+                        outputChannel.appendLine(`在文件 ${file.fsPath} 中找到结构体定义: ${structNameOnly}`);
+                        return parseStructFieldsFromDefinition(match[1], outputChannel);
+                    }
+                }
+                catch (error) {
+                    outputChannel.appendLine(`搜索文件 ${file.fsPath} 时出错: ${error}`);
                 }
             }
-            catch (error) {
-                // 忽略单个文件的错误，继续搜索
-                outputChannel.appendLine(`搜索文件 ${file.fsPath} 时出错: ${error}`);
+        }
+        else {
+            // 如果没有包名，在当前文件和工作区中查找
+            const currentFileText = document.getText();
+            const structRegex = new RegExp(`type\\s+${structNameOnly}\\s+struct\\s*{([^}]+)}`, 's');
+            let match = structRegex.exec(currentFileText);
+            if (match) {
+                outputChannel.appendLine(`在当前文件中找到结构体定义: ${structNameOnly}`);
+                return parseStructFieldsFromDefinition(match[1], outputChannel);
+            }
+            // 在工作区的所有.go文件中查找
+            const goFiles = await vscode.workspace.findFiles('**/*.go', null, 50);
+            for (const file of goFiles) {
+                if (file.fsPath === document.uri.fsPath) {
+                    continue; // 跳过当前文件，已经搜索过了
+                }
+                try {
+                    const fileDoc = await vscode.workspace.openTextDocument(file);
+                    const fileText = fileDoc.getText();
+                    const match = structRegex.exec(fileText);
+                    if (match) {
+                        outputChannel.appendLine(`在文件 ${file.fsPath} 中找到结构体定义: ${structNameOnly}`);
+                        return parseStructFieldsFromDefinition(match[1], outputChannel);
+                    }
+                }
+                catch (error) {
+                    outputChannel.appendLine(`搜索文件 ${file.fsPath} 时出错: ${error}`);
+                }
             }
         }
         outputChannel.appendLine(`未找到结构体 ${structName} 的定义`);
