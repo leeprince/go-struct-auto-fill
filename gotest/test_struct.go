@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"testing"
 )
 
 type ddd struct {
@@ -27,7 +28,7 @@ type ListNode struct {
 	Next *ListNode `json:"next,omitempty"`
 }
 
-func main() {
+func TestStruct(t *testing.T) {
 	fmt.Println("=== 测试按结构体定义顺序自动填充 ===")
 
 	// 测试场景1：空结构体（应该按顺序填充所有字段：Name -> Age -> Address）
@@ -101,11 +102,12 @@ func main() {
 	})
 
 	// 测试场景9：函数参数中的有序填充。
-	processStruct(ddd{
-		// todo: 只会保留当前不存在的字段
+	var processStructDDD = ddd{
 		Name:    "",
+		Age:     0,
 		Address: "",
-	})
+	}
+	processStruct(processStructDDD)
 
 	// 测试场景10：完全空的结构体（边界情况）
 	d_empty := ddd{

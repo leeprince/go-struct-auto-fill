@@ -1,9 +1,12 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"testing"
+)
 
 // 测试结构体定义
-type User struct {
+type User1 struct {
 	Name    string `json:"name,omitempty"`
 	Age     int    `json:"age,omitempty"`
 	Address string `json:"address,omitempty"`
@@ -16,40 +19,38 @@ type Profile struct {
 	Active   bool   `json:"active,omitempty"`
 }
 
-func main() {
+func TestFieldOrder(t *testing.T) {
 	fmt.Println("=== 测试按结构体定义顺序自动填充功能 ===")
 
 	// 🎯 测试场景1：空结构体 - 应该按顺序填充：Name -> Age -> Address
-	user1 := User{
+	user1 := User1{
 		// 光标放在这里，按 Alt+Enter，应该按定义顺序生成所有字段
 	}
 
 	// 🎯 测试场景2：部分字段乱序 - 应该保留值并重新排序
-	user2 := User{
+	user2 := User1{
 		Address: "beijing",
 		Name:    "test_user",
 		// 光标放在这里，按 Alt+Enter，应该填充 Age 并重新排序为：Name -> Age -> Address
 	}
 
 	// 🎯 测试场景3：只有中间字段 - 应该补充缺失字段并保持顺序
-	user3 := User{
+	user3 := User1{
 		Name:    "",
+		Age:     25, // 10,
 		Address: "",
-		Age:     25,
-		// 光标放在这里，按 Alt+Enter，应该补充 Name 和 Address，按顺序排列
 	}
 
 	// 🎯 测试场景4：字段顺序完全错乱 - 应该完全重新排序
-	user4 := User{
-
+	user4 := User1{
 		Name:    "reorder_test",
 		Age:     0,
 		Address: "",
 	}
 
 	// 🎯 测试场景5：数组中的有序填充
-	users := []User{
-		User{
+	users := []User1{
+		User1{
 			Name:    "array_user",
 			Age:     0,
 			Address: "",
@@ -57,10 +58,11 @@ func main() {
 	}
 
 	// 🎯 测试场景6：Map中的有序填充
-	userMap := map[string]User{
-		"admin": User{
-			Age: 35,
-			// 光标放在这里，按 Alt+Enter，应该补充 Name 和 Address，按顺序排列
+	userMap := map[string]User1{
+		"admin": User1{
+			Name:    "",
+			Age:     0,
+			Address: "",
 		},
 	}
 
@@ -72,7 +74,7 @@ func main() {
 	}
 
 	// 🎯 测试场景8：嵌套结构体解析测试（v1.2.5修复重点）
-	nestedTest := User{
+	nestedTest := User1{
 		Name:    "parent",
 		Address: "parent_address",
 		// 光标放在这里，应该补充 Age 字段，保持顺序

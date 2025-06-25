@@ -217,8 +217,8 @@ function findStructDeclarationBeforeBrace(document, braceLineNum, braceCharPos, 
     const braceLineText = document.lineAt(braceLineNum).text;
     const textBeforeBrace = braceLineText.substring(0, braceCharPos).trim();
     outputChannel.appendLine(`分析大括号前的文本: "${textBeforeBrace}"`);
-    // 检查是否是嵌套结构体字段赋值
-    const nestedFieldMatch = textBeforeBrace.match(/(\w+):\s*&?(\w+)$/);
+    // 检查是否是嵌套结构体字段赋值 - 支持包名
+    const nestedFieldMatch = textBeforeBrace.match(/(\w+):\s*&?([\w\.]+)$/);
     if (nestedFieldMatch) {
         const structName = nestedFieldMatch[2];
         outputChannel.appendLine(`找到嵌套结构体字段: ${nestedFieldMatch[1]}: ${structName}`);
@@ -229,23 +229,22 @@ function findStructDeclarationBeforeBrace(document, braceLineNum, braceCharPos, 
         };
     }
     // 检查各种结构体初始化模式
-    // 1. 数组初始化（同一行）
-    if (textBeforeBrace.match(/\[\]\s*(\w+)$/) || textBeforeBrace.match(/\w+\s*:=\s*\[\]\s*(\w+)$/)) {
-        const arrayMatch = textBeforeBrace.match(/\[\]\s*(\w+)$/) || textBeforeBrace.match(/\w+\s*:=\s*\[\]\s*(\w+)$/);
-        if (arrayMatch) {
-            const structName = arrayMatch[1];
-            outputChannel.appendLine(`找到数组结构体初始化: ${structName}`);
-            return {
-                structName,
-                isNestedStruct: false,
-                matchType: 'array'
-            };
-        }
+    // 1. 数组初始化（同一行）- 支持包名
+    const arrayMatch = textBeforeBrace.match(/\[\]\s*([\w\.]+)$/) ||
+        textBeforeBrace.match(/\w+\s*:=\s*\[\]\s*([\w\.]+)$/);
+    if (arrayMatch) {
+        const structName = arrayMatch[1];
+        outputChannel.appendLine(`找到数组结构体初始化: ${structName}`);
+        return {
+            structName,
+            isNestedStruct: false,
+            matchType: 'array'
+        };
     }
-    // 2. Map初始化（同一行）
-    const mapMatch = textBeforeBrace.match(/map\[[^\]]+\]\s*(\w+)$/) ||
-        textBeforeBrace.match(/\w+\s*:=\s*map\[[^\]]+\]\s*(\w+)$/) ||
-        textBeforeBrace.match(/"[^"]*":\s*(\w+)$/);
+    // 2. Map初始化（同一行）- 支持包名
+    const mapMatch = textBeforeBrace.match(/map\[[^\]]+\]\s*([\w\.]+)$/) ||
+        textBeforeBrace.match(/\w+\s*:=\s*map\[[^\]]+\]\s*([\w\.]+)$/) ||
+        textBeforeBrace.match(/"[^"]*":\s*([\w\.]+)$/);
     if (mapMatch) {
         const structName = mapMatch[1];
         outputChannel.appendLine(`找到map结构体初始化: ${structName}`);
@@ -255,9 +254,9 @@ function findStructDeclarationBeforeBrace(document, braceLineNum, braceCharPos, 
             matchType: 'map'
         };
     }
-    // 3. append函数（同一行）
-    const appendMatch = textBeforeBrace.match(/append\([^,]+,\s*(\w+)$/) ||
-        textBeforeBrace.match(/append\([^,]+,\s*[^,]*,\s*(\w+)$/);
+    // 3. append函数（同一行）- 支持包名
+    const appendMatch = textBeforeBrace.match(/append\([^,]+,\s*([\w\.]+)$/) ||
+        textBeforeBrace.match(/append\([^,]+,\s*[^,]*,\s*([\w\.]+)$/);
     if (appendMatch) {
         const structName = appendMatch[1];
         outputChannel.appendLine(`找到append结构体初始化: ${structName}`);
@@ -267,9 +266,9 @@ function findStructDeclarationBeforeBrace(document, braceLineNum, braceCharPos, 
             matchType: 'append'
         };
     }
-    // 4. 函数参数（同一行）
-    const funcParamMatch = textBeforeBrace.match(/\w+\([^)]*(\w+)$/) ||
-        textBeforeBrace.match(/\w+\([^)]*,\s*(\w+)$/);
+    // 4. 函数参数（同一行）- 支持包名
+    const funcParamMatch = textBeforeBrace.match(/\w+\([^)]*([\w\.]+)$/) ||
+        textBeforeBrace.match(/\w+\([^)]*,\s*([\w\.]+)$/);
     if (funcParamMatch) {
         const structName = funcParamMatch[1];
         outputChannel.appendLine(`找到函数参数结构体初始化: ${structName}`);
@@ -279,8 +278,8 @@ function findStructDeclarationBeforeBrace(document, braceLineNum, braceCharPos, 
             matchType: 'function_param'
         };
     }
-    // 5. 普通变量初始化（同一行）
-    const variableMatch = textBeforeBrace.match(/(?:var\s+)?(\w+)\s*(?:=|:=)\s*&?(\w+)$/);
+    // 5. 普通变量初始化（同一行）- 支持包名和指针
+    const variableMatch = textBeforeBrace.match(/(?:var\s+)?(\w+)\s*(?:=|:=)\s*&?([\w\.]+)$/);
     if (variableMatch) {
         const structName = variableMatch[2];
         outputChannel.appendLine(`找到普通变量结构体初始化: ${structName}`);
@@ -290,8 +289,8 @@ function findStructDeclarationBeforeBrace(document, braceLineNum, braceCharPos, 
             matchType: 'variable'
         };
     }
-    // 6. 特殊情况：只有结构体名称（可能是数组元素、map值等）
-    const structNameMatch = textBeforeBrace.match(/^(\w+)$/);
+    // 6. 特殊情况：只有结构体名称（可能是数组元素、map值等）- 支持包名
+    const structNameMatch = textBeforeBrace.match(/^([\w\.]+)$/);
     if (structNameMatch) {
         const structName = structNameMatch[1];
         outputChannel.appendLine(`检测到单独的结构体名称: ${structName}，开始上下文分析`);
@@ -325,22 +324,24 @@ function findStructDeclarationBeforeBrace(document, braceLineNum, braceCharPos, 
  */
 function analyzeStructContextByLookingUp(document, braceLineNum, structName, outputChannel) {
     outputChannel.appendLine(`开始向上查找 "${structName}" 的上下文`);
+    // 转义结构体名称中的点号，用于正则表达式
+    const escapedStructName = structName.replace(/\./g, '\\.');
     // 向上查找最多10行来确定上下文
     for (let lineNum = braceLineNum - 1; lineNum >= Math.max(0, braceLineNum - 10); lineNum--) {
         const lineText = document.lineAt(lineNum).text;
         outputChannel.appendLine(`检查行 ${lineNum}: "${lineText}"`);
-        // 检查是否是数组声明 - 更灵活的模式匹配
+        // 检查是否是数组声明 - 更灵活的模式匹配，支持包名
         const arrayPatterns = [
-            // 基本数组模式：[]StructName{
-            new RegExp(`\\[\\]\\s*${structName}\\s*{\\s*$`),
-            // 变量赋值数组模式：varName := []StructName{
-            new RegExp(`(\\w+)\\s*:=\\s*\\[\\]\\s*${structName}\\s*{\\s*$`),
-            // var声明数组模式：var varName = []StructName{
-            new RegExp(`var\\s+(\\w+)\\s*=\\s*\\[\\]\\s*${structName}\\s*{\\s*$`),
+            // 基本数组模式：[]pkg.StructName{
+            new RegExp(`\\[\\]\\s*${escapedStructName}\\s*{\\s*$`),
+            // 变量赋值数组模式：varName := []pkg.StructName{
+            new RegExp(`(\\w+)\\s*:=\\s*\\[\\]\\s*${escapedStructName}\\s*{\\s*$`),
+            // var声明数组模式：var varName = []pkg.StructName{
+            new RegExp(`var\\s+(\\w+)\\s*=\\s*\\[\\]\\s*${escapedStructName}\\s*{\\s*$`),
             // 更宽松的数组模式，不要求大括号在行末
-            new RegExp(`\\[\\]\\s*${structName}\\s*{`),
-            new RegExp(`(\\w+)\\s*:=\\s*\\[\\]\\s*${structName}\\s*{`),
-            new RegExp(`var\\s+(\\w+)\\s*=\\s*\\[\\]\\s*${structName}\\s*{`)
+            new RegExp(`\\[\\]\\s*${escapedStructName}\\s*{`),
+            new RegExp(`(\\w+)\\s*:=\\s*\\[\\]\\s*${escapedStructName}\\s*{`),
+            new RegExp(`var\\s+(\\w+)\\s*=\\s*\\[\\]\\s*${escapedStructName}\\s*{`)
         ];
         for (const pattern of arrayPatterns) {
             if (pattern.test(lineText)) {
@@ -352,18 +353,18 @@ function analyzeStructContextByLookingUp(document, braceLineNum, structName, out
                 };
             }
         }
-        // 检查是否是Map声明 - 更灵活的模式匹配
+        // 检查是否是Map声明 - 更灵活的模式匹配，支持包名
         const mapPatterns = [
-            // 基本map模式：map[KeyType]StructName{
-            new RegExp(`map\\[[^\\]]+\\]\\s*${structName}\\s*{\\s*$`),
-            // 变量赋值map模式：varName := map[KeyType]StructName{
-            new RegExp(`(\\w+)\\s*:=\\s*map\\[[^\\]]+\\]\\s*${structName}\\s*{\\s*$`),
-            // map值模式："key": StructName{
-            new RegExp(`"[^"]*":\\s*${structName}\\s*{\\s*$`),
+            // 基本map模式：map[KeyType]pkg.StructName{
+            new RegExp(`map\\[[^\\]]+\\]\\s*${escapedStructName}\\s*{\\s*$`),
+            // 变量赋值map模式：varName := map[KeyType]pkg.StructName{
+            new RegExp(`(\\w+)\\s*:=\\s*map\\[[^\\]]+\\]\\s*${escapedStructName}\\s*{\\s*$`),
+            // map值模式："key": pkg.StructName{
+            new RegExp(`"[^"]*":\\s*${escapedStructName}\\s*{\\s*$`),
             // 更宽松的map模式
-            new RegExp(`map\\[[^\\]]+\\]\\s*${structName}\\s*{`),
-            new RegExp(`(\\w+)\\s*:=\\s*map\\[[^\\]]+\\]\\s*${structName}\\s*{`),
-            new RegExp(`"[^"]*":\\s*${structName}\\s*{`)
+            new RegExp(`map\\[[^\\]]+\\]\\s*${escapedStructName}\\s*{`),
+            new RegExp(`(\\w+)\\s*:=\\s*map\\[[^\\]]+\\]\\s*${escapedStructName}\\s*{`),
+            new RegExp(`"[^"]*":\\s*${escapedStructName}\\s*{`)
         ];
         for (const pattern of mapPatterns) {
             if (pattern.test(lineText)) {
@@ -375,15 +376,15 @@ function analyzeStructContextByLookingUp(document, braceLineNum, structName, out
                 };
             }
         }
-        // 检查是否是append函数 - 更灵活的模式匹配
+        // 检查是否是append函数 - 更灵活的模式匹配，支持包名
         const appendPatterns = [
-            // append模式：append(slice, StructName{
-            new RegExp(`append\\([^,]+,\\s*${structName}\\s*{\\s*$`),
-            // append多参数模式：append(slice, other, StructName{
-            new RegExp(`append\\([^,]+,\\s*[^,]*,\\s*${structName}\\s*{\\s*$`),
+            // append模式：append(slice, pkg.StructName{
+            new RegExp(`append\\([^,]+,\\s*${escapedStructName}\\s*{\\s*$`),
+            // append多参数模式：append(slice, other, pkg.StructName{
+            new RegExp(`append\\([^,]+,\\s*[^,]*,\\s*${escapedStructName}\\s*{\\s*$`),
             // 更宽松的append模式
-            new RegExp(`append\\([^,]+,\\s*${structName}\\s*{`),
-            new RegExp(`append\\([^,]+,\\s*[^,]*,\\s*${structName}\\s*{`)
+            new RegExp(`append\\([^,]+,\\s*${escapedStructName}\\s*{`),
+            new RegExp(`append\\([^,]+,\\s*[^,]*,\\s*${escapedStructName}\\s*{`)
         ];
         for (const pattern of appendPatterns) {
             if (pattern.test(lineText)) {
@@ -395,15 +396,15 @@ function analyzeStructContextByLookingUp(document, braceLineNum, structName, out
                 };
             }
         }
-        // 检查是否是函数参数 - 更灵活的模式匹配
+        // 检查是否是函数参数 - 更灵活的模式匹配，支持包名
         const funcParamPatterns = [
-            // 函数参数模式：funcName(StructName{
-            new RegExp(`\\w+\\([^)]*${structName}\\s*{\\s*$`),
-            // 函数多参数模式：funcName(param, StructName{
-            new RegExp(`\\w+\\([^)]*,\\s*${structName}\\s*{\\s*$`),
+            // 函数参数模式：funcName(pkg.StructName{
+            new RegExp(`\\w+\\([^)]*${escapedStructName}\\s*{\\s*$`),
+            // 函数多参数模式：funcName(param, pkg.StructName{
+            new RegExp(`\\w+\\([^)]*,\\s*${escapedStructName}\\s*{\\s*$`),
             // 更宽松的函数参数模式
-            new RegExp(`\\w+\\([^)]*${structName}\\s*{`),
-            new RegExp(`\\w+\\([^)]*,\\s*${structName}\\s*{`)
+            new RegExp(`\\w+\\([^)]*${escapedStructName}\\s*{`),
+            new RegExp(`\\w+\\([^)]*,\\s*${escapedStructName}\\s*{`)
         ];
         for (const pattern of funcParamPatterns) {
             if (pattern.test(lineText)) {
@@ -461,8 +462,8 @@ function findVariableDeclarationBeforeBrace(document, braceLineNum, braceCharPos
     for (let lineNum = braceLineNum - 1; lineNum >= Math.max(0, braceLineNum - 3); lineNum--) {
         const lineText = document.lineAt(lineNum).text.trim();
         outputChannel.appendLine(`向上查找变量声明，检查行 ${lineNum}: "${lineText}"`);
-        // 匹配变量声明模式
-        const variableMatch = lineText.match(/(?:var\s+)?(\w+)\s*(?:=|:=)\s*&?(\w+)$/);
+        // 匹配变量声明模式 - 支持包名
+        const variableMatch = lineText.match(/(?:var\s+)?(\w+)\s*(?:=|:=)\s*&?([\w\.]+)$/);
         if (variableMatch) {
             outputChannel.appendLine(`找到跨行变量声明: ${variableMatch[1]} := ${variableMatch[2]}`);
             return variableMatch;
@@ -495,29 +496,29 @@ function findMultiLineStructDeclaration(document, braceLineNum, braceCharPos, ou
     outputChannel.appendLine(`分析合并后的文本: "${combinedText}"`);
     // 尝试匹配各种模式
     const patterns = [
-        // 普通变量声明
-        { regex: /(?:var\s+)?(\w+)\s*(?:=|:=)\s*&?(\w+)$/, type: 'variable' },
-        // 数组初始化 - 基本格式
-        { regex: /(?:var\s+)?(\w+)\s*(?:=|:=)\s*\[\]\s*(\w+)$/, type: 'array' },
-        // 数组初始化 - 带元素
-        { regex: /(?:var\s+)?(\w+)\s*(?:=|:=)\s*\[\]\s*(\w+)\s*{\s*(\w+)$/, type: 'array' },
-        // 数组元素
-        { regex: /\[\]\s*(\w+)\s*{\s*.*?(\w+)$/, type: 'array' },
-        // Map初始化 - 基本格式
-        { regex: /(?:var\s+)?(\w+)\s*(?:=|:=)\s*map\[[^\]]+\]\s*(\w+)$/, type: 'map' },
-        // Map初始化 - 带值
-        { regex: /(?:var\s+)?(\w+)\s*(?:=|:=)\s*map\[[^\]]+\]\s*(\w+)\s*{\s*.*?(\w+)$/, type: 'map' },
-        // Map值
-        { regex: /"[^"]*":\s*(\w+)$/, type: 'map' },
-        // append函数
-        { regex: /append\([^,]+,\s*(\w+)$/, type: 'append' },
-        { regex: /append\([^,]+,\s*[^,]*,\s*(\w+)$/, type: 'append' },
-        // 函数参数
-        { regex: /\w+\([^)]*(\w+)$/, type: 'function_param' },
-        { regex: /\w+\([^)]*,\s*(\w+)$/, type: 'function_param' },
-        // 复杂的数组元素场景
-        { regex: /(\w+)\s*:=\s*\[\]\s*(\w+)\s*{\s*(\w+)$/, type: 'array' },
-        { regex: /(\w+)\s*:=\s*map\[[^\]]+\]\s*(\w+)\s*{\s*"[^"]*":\s*(\w+)$/, type: 'map' }
+        // 普通变量声明 - 支持包名
+        { regex: /(?:var\s+)?(\w+)\s*(?:=|:=)\s*&?([\w\.]+)$/, type: 'variable' },
+        // 数组初始化 - 基本格式，支持包名
+        { regex: /(?:var\s+)?(\w+)\s*(?:=|:=)\s*\[\]\s*([\w\.]+)$/, type: 'array' },
+        // 数组初始化 - 带元素，支持包名
+        { regex: /(?:var\s+)?(\w+)\s*(?:=|:=)\s*\[\]\s*([\w\.]+)\s*{\s*([\w\.]+)$/, type: 'array' },
+        // 数组元素，支持包名
+        { regex: /\[\]\s*([\w\.]+)\s*{\s*.*?([\w\.]+)$/, type: 'array' },
+        // Map初始化 - 基本格式，支持包名
+        { regex: /(?:var\s+)?(\w+)\s*(?:=|:=)\s*map\[[^\]]+\]\s*([\w\.]+)$/, type: 'map' },
+        // Map初始化 - 带值，支持包名
+        { regex: /(?:var\s+)?(\w+)\s*(?:=|:=)\s*map\[[^\]]+\]\s*([\w\.]+)\s*{\s*.*?([\w\.]+)$/, type: 'map' },
+        // Map值，支持包名
+        { regex: /"[^"]*":\s*([\w\.]+)$/, type: 'map' },
+        // append函数，支持包名
+        { regex: /append\([^,]+,\s*([\w\.]+)$/, type: 'append' },
+        { regex: /append\([^,]+,\s*[^,]*,\s*([\w\.]+)$/, type: 'append' },
+        // 函数参数，支持包名
+        { regex: /\w+\([^)]*([\w\.]+)$/, type: 'function_param' },
+        { regex: /\w+\([^)]*,\s*([\w\.]+)$/, type: 'function_param' },
+        // 复杂的数组元素场景，支持包名
+        { regex: /(\w+)\s*:=\s*\[\]\s*([\w\.]+)\s*{\s*([\w\.]+)$/, type: 'array' },
+        { regex: /(\w+)\s*:=\s*map\[[^\]]+\]\s*([\w\.]+)\s*{\s*"[^"]*":\s*([\w\.]+)$/, type: 'map' }
     ];
     for (const pattern of patterns) {
         const match = combinedText.match(pattern.regex);
@@ -563,8 +564,8 @@ function findMultiLineStructDeclaration(document, braceLineNum, braceCharPos, ou
     const words = combinedText.split(/\s+/);
     for (let i = words.length - 1; i >= 0; i--) {
         const word = words[i];
-        // 检查是否是有效的Go结构体名称（首字母大写）
-        if (/^[A-Z][a-zA-Z0-9]*$/.test(word)) {
+        // 检查是否是有效的Go结构体名称（首字母大写，支持包名）
+        if (/^[A-Z][a-zA-Z0-9]*$/.test(word) || /^[a-z][a-zA-Z0-9]*\.[A-Z][a-zA-Z0-9]*$/.test(word)) {
             outputChannel.appendLine(`尝试使用提取的结构体名称: ${word}`);
             // 根据上下文推断类型
             let matchType = 'variable';
@@ -796,7 +797,7 @@ function generateFillCode(fields, outputChannel, matchType) {
         // 使用与现有字段相同的对齐方式
         const fieldName = field.name.padEnd(maxFieldNameLength);
         // 确保使用 tab 字符
-        const indent = indentInfo.type === 'tab' ? '\t' : indentInfo.fieldIndent;
+        const indent = '\t'; // 直接使用 tab 字符
         return `${indent}${fieldName}: ${defaultValue},`;
     });
     // 如果没有字段，不生成代码
@@ -815,7 +816,7 @@ function generateFillCode(fields, outputChannel, matchType) {
         case 'variable':
         default:
             // 使用标准格式，保持一致的缩进
-            const baseIndent = indentInfo.type === 'tab' ? '\t' : indentInfo.baseIndent;
+            const baseIndent = '\t'; // 直接使用 tab 字符
             generatedCode = `\n${fieldLines.join('\n')}\n${baseIndent}`;
             break;
     }
@@ -1047,37 +1048,98 @@ function findOptimalCompletionPosition(document, position, structName, matchType
  */
 function parseExistingStructFields(document, position, outputChannel) {
     const fields = new Map();
-    // 获取当前行和周围几行的文本
-    const lines = [];
-    for (let i = Math.max(0, position.line - 2); i <= position.line + 2; i++) {
-        if (i < document.lineCount) {
-            lines.push(document.lineAt(i).text);
+    // 首先找到结构体初始化块的范围
+    const structRange = getCurrentStructRange(document, position);
+    if (!structRange) {
+        outputChannel.appendLine('无法确定结构体初始化块范围，使用默认解析方式');
+        // 回退到原来的解析方式
+        const lines = [];
+        for (let i = Math.max(0, position.line - 2); i <= position.line + 2; i++) {
+            if (i < document.lineCount) {
+                lines.push(document.lineAt(i).text);
+            }
         }
+        // 查找字段行
+        for (const line of lines) {
+            const fieldMatch = line.match(/^\s*(\w+)\s*:/);
+            if (fieldMatch) {
+                const fieldName = fieldMatch[1];
+                const valueMatch = line.match(/:\s*(.+),/);
+                if (valueMatch) {
+                    fields.set(fieldName, valueMatch[1].trim());
+                }
+            }
+        }
+        return fields;
     }
-    // 查找字段行
-    for (const line of lines) {
-        const fieldMatch = line.match(/^\s*(\w+)\s*:/);
+    outputChannel.appendLine(`结构体初始化块范围: ${structRange.start.line}:${structRange.start.character} - ${structRange.end.line}:${structRange.end.character}`);
+    // 解析整个结构体初始化块中的所有字段
+    for (let lineNum = structRange.start.line; lineNum <= structRange.end.line; lineNum++) {
+        const line = document.lineAt(lineNum).text;
+        // 跳过开大括号和闭大括号行
+        if (line.trim() === '{' || line.trim() === '}') {
+            continue;
+        }
+        // 跳过包含变量声明的行（如 userInfo := &user.User{）
+        if (line.includes(':=') || line.includes('=') && !line.includes(':')) {
+            continue;
+        }
+        // 更严格的字段行匹配：确保是有效的字段定义
+        // 字段行格式：[空白]FieldName: Value[,]
+        const fieldMatch = line.match(/^\s*([A-Z][a-zA-Z0-9]*)\s*:\s*(.+?)(?:,\s*)?$/);
         if (fieldMatch) {
             const fieldName = fieldMatch[1];
-            const valueMatch = line.match(/:\s*(.+),/);
-            if (valueMatch) {
-                fields.set(fieldName, valueMatch[1].trim());
+            let fieldValue = fieldMatch[2].trim();
+            // 移除末尾的逗号
+            if (fieldValue.endsWith(',')) {
+                fieldValue = fieldValue.slice(0, -1).trim();
+            }
+            if (fieldValue) {
+                fields.set(fieldName, fieldValue);
+                outputChannel.appendLine(`解析到已存在字段: ${fieldName} = ${fieldValue}`);
             }
         }
     }
+    outputChannel.appendLine(`总共解析到 ${fields.size} 个已存在字段: [${Array.from(fields.keys()).join(', ')}]`);
     return fields;
 }
 /**
  * 根据补全项获取结构体字段的完整顺序
+ * 过滤掉不可访问的字段
  */
 function getStructFieldOrder(completionItems, outputChannel) {
     const fieldOrder = [];
+    // 定义不可访问的字段名称（protobuf 生成的内部字段）
+    const inaccessibleFields = new Set([
+        'state',
+        'unknownFields',
+        'sizeCache',
+        'XXX_unrecognized',
+        'XXX_sizecache',
+        'XXX_NoUnkeyedLiteral',
+        'XXX_unrecognized',
+        'XXX_sizecache',
+        'XXX_InternalExtensions',
+        'XXX_extensions'
+    ]);
     for (const item of completionItems.items) {
         if (item.kind === vscode.CompletionItemKind.Field) {
             const fieldName = typeof item.label === 'string' ? item.label : item.label.label;
-            if (!fieldName.includes('.')) {
-                fieldOrder.push(fieldName);
+            // 过滤掉包含点号的字段（嵌套字段）
+            if (fieldName.includes('.')) {
+                continue;
             }
+            // 过滤掉不可访问的字段
+            if (inaccessibleFields.has(fieldName)) {
+                outputChannel.appendLine(`跳过不可访问字段: ${fieldName}`);
+                continue;
+            }
+            // 过滤掉以小写字母开头的私有字段
+            if (fieldName[0] === fieldName[0].toLowerCase()) {
+                outputChannel.appendLine(`跳过私有字段: ${fieldName}`);
+                continue;
+            }
+            fieldOrder.push(fieldName);
         }
     }
     outputChannel.appendLine(`结构体字段定义顺序: [${fieldOrder.join(', ')}]`);
@@ -1363,6 +1425,7 @@ async function getStructFieldDefinitionOrder(structName, document, outputChannel
 }
 /**
  * 解析结构体字段定义文本，提取字段名称和类型，保持原始顺序
+ * 过滤掉 protobuf 生成的结构体中的不可访问字段
  */
 function parseStructFieldsFromDefinition(fieldsText, outputChannel) {
     const fields = [];
@@ -1374,6 +1437,19 @@ function parseStructFieldsFromDefinition(fieldsText, outputChannel) {
     outputChannel.appendLine(`解析结构体字段文本:\n${cleanText}`);
     // 按行分割并解析每个字段
     const lines = cleanText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    // 定义不可访问的字段名称（protobuf 生成的内部字段）
+    const inaccessibleFields = new Set([
+        'state',
+        'unknownFields',
+        'sizeCache',
+        'XXX_unrecognized',
+        'XXX_sizecache',
+        'XXX_NoUnkeyedLiteral',
+        'XXX_unrecognized',
+        'XXX_sizecache',
+        'XXX_InternalExtensions',
+        'XXX_extensions'
+    ]);
     for (const line of lines) {
         // 匹配字段定义：FieldName Type `tags`
         // 支持多种格式：
@@ -1385,6 +1461,16 @@ function parseStructFieldsFromDefinition(fieldsText, outputChannel) {
         if (fieldMatch) {
             const fieldName = fieldMatch[1];
             const fieldType = fieldMatch[2];
+            // 过滤掉不可访问的字段
+            if (inaccessibleFields.has(fieldName)) {
+                outputChannel.appendLine(`跳过不可访问字段: ${fieldName} (类型: ${fieldType})`);
+                continue;
+            }
+            // 过滤掉以小写字母开头的私有字段
+            if (fieldName[0] === fieldName[0].toLowerCase()) {
+                outputChannel.appendLine(`跳过私有字段: ${fieldName} (类型: ${fieldType})`);
+                continue;
+            }
             fields.push({
                 name: fieldName,
                 type: fieldType
@@ -1392,7 +1478,7 @@ function parseStructFieldsFromDefinition(fieldsText, outputChannel) {
             outputChannel.appendLine(`解析到字段: ${fieldName} (类型: ${fieldType})`);
         }
     }
-    outputChannel.appendLine(`总共解析到 ${fields.length} 个字段，顺序: [${fields.map(f => f.name).join(', ')}]`);
+    outputChannel.appendLine(`总共解析到 ${fields.length} 个可访问字段，顺序: [${fields.map(f => f.name).join(', ')}]`);
     return fields;
 }
 function analyzeExistingIndent(document, position, outputChannel) {
