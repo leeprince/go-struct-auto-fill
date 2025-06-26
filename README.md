@@ -958,17 +958,3 @@ user := User{
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## TODO
-
-### 缩进问题
-
-- [ ] 修复结构体字段填充时的缩进问题
-  - 当前问题：虽然代码中正确识别了 tab 缩进，但在实际插入代码时仍然使用了空格符
-  - 影响：导致生成的代码与现有代码的缩进风格不一致
-  - 相关文件：`src/extension.ts`
-  - 相关函数：`generateFillCode`、`analyzeIndentInfo`
-  - 解决思路：
-    1. 检查 VSCode 的编辑操作 API 是否有特殊处理 tab 字符的方式
-    2. 考虑使用 VSCode 的 `TextEdit` API 来确保保持原始缩进
-    3. 研究 VSCode 的缩进设置是否会影响代码插入行为
