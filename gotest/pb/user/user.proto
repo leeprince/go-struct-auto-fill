@@ -14,10 +14,30 @@ option go_package = ".;user";
 
 // 示例消息
 message User {
-    int32 id = 1;
-    string name = 2;
-    string email = 3;
-    int32 is_active = 4; // 1:激活；2:禁用；3:删除
+    int32 id = 1;                  // 用户唯一ID
+    string name = 2;               // 用户名
+    string email = 3;              // 邮箱地址
+    int32 is_active = 4;           // 账户状态：1:激活；2:禁用；3:删除
+
+    string phone = 5;              // 手机号码
+    int64 created_at = 6;          // 创建时间戳（Unix时间）
+    int64 updated_at = 7;          // 最后更新时间戳
+    string avatar_url = 8;         // 头像URL
+
+    int32 gender = 9;              // 性别：1:男；2:女；0:未知
+    string city = 10;              // 城市
+    string province = 11;          // 省份
+    string country = 12;           // 国家
+
+    bool is_vip = 13;              // 是否VIP用户
+    int64 last_login = 14;         // 上次登录时间戳
+    repeated string roles = 15;    // 用户角色列表，如 ["admin", "user"]
+
+    string nickname = 16;          // 昵称
+    int32 age = 17;                // 年龄
+    string bio = 18;               // 简介或自我介绍
+    string job_title = 19;         // 职位名称
+    string company = 20;           // 公司名称
 }
 
 // 示例服务

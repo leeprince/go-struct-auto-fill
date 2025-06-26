@@ -184,8 +184,18 @@ export function activate(context: vscode.ExtensionContext) {
             await editor.edit(editBuilder => {
                 const replaceRange = calculateStructContentRange(document, position, outputChannel);
                 if (replaceRange) {
+                    // 检查是否是同一行的结构体初始化
+                    const isSameLineInit = (replaceRange as any).isSameLineInit;
+                    let finalCode = orderedFieldsCode;
+
+                    if (isSameLineInit) {
+                        // 对于同一行的结构体初始化，需要添加换行符
+                        outputChannel.appendLine('检测到同一行结构体初始化，添加换行格式');
+                        finalCode = '\n' + orderedFieldsCode + '\n' + (document.lineAt(replaceRange.start.line).text.match(/^(\s*)/)?.[1] || '');
+                    }
+
                     // 替换整个结构体内容
-                    editBuilder.replace(replaceRange, orderedFieldsCode);
+                    editBuilder.replace(replaceRange, finalCode);
                     outputChannel.appendLine(`已替换结构体内容，范围: ${replaceRange.start.line}:${replaceRange.start.character} - ${replaceRange.end.line}:${replaceRange.end.character}`);
                 } else {
                     // 如果无法确定替换范围，使用插入模式（兼容性处理）
@@ -227,10 +237,17 @@ function identifyStructInitialization(
 
     outputChannel.appendLine(`开始识别结构体初始化，当前行: ${currentLineText}`);
 
-    // 简化逻辑：直接从当前光标位置向上查找结构体声明
+    // 首先尝试简化逻辑：直接从当前光标位置向上查找结构体声明
     const structResult = findStructDeclarationSimple(document, position, outputChannel);
     if (structResult) {
         return structResult;
+    }
+
+    // 如果简化查找失败，使用更强大的上下文分析作为备选方案
+    outputChannel.appendLine('简化查找失败，尝试使用上下文分析');
+    const contextResult = analyzeStructContext(document, position, outputChannel);
+    if (contextResult) {
+        return contextResult;
     }
 
     return null;
@@ -248,8 +265,8 @@ function findStructDeclarationSimple(
 
     outputChannel.appendLine(`开始简化的结构体声明查找，光标位置: ${position.line}:${position.character}`);
 
-    // 从当前行开始向上查找，最多查找10行
-    for (let lineNum = position.line; lineNum >= Math.max(0, position.line - 10); lineNum--) {
+    // 从当前行开始向上查找，最多查找50行（支持更大的结构体）
+    for (let lineNum = position.line; lineNum >= Math.max(0, position.line - 50); lineNum--) {
         const lineText = document.lineAt(lineNum).text;
         outputChannel.appendLine(`检查行 ${lineNum}: "${lineText}"`);
 
@@ -273,9 +290,13 @@ function findStructDeclarationSimple(
                 // 获取结构体名称（最后一个捕获组通常是结构体名）
                 let structName = '';
                 for (let i = match.length - 1; i >= 1; i--) {
-                    if (match[i] && /^[\w\.]+$/.test(match[i]) && match[i].includes('.') || /^[A-Z]/.test(match[i])) {
-                        structName = match[i];
-                        break;
+                    if (match[i] && /^[\w\.]+$/.test(match[i])) {
+                        // 修复：接受所有符合标识符规范的结构体名称，不仅仅是大写开头的
+                        // 包名形式（包含点号）或者是有效的Go标识符都应该被接受
+                        if (match[i].includes('.') || /^[a-zA-Z_]\w*$/.test(match[i])) {
+                            structName = match[i];
+                            break;
+                        }
                     }
                 }
 
@@ -888,134 +909,109 @@ function calculateStructContentRange(
     try {
         outputChannel.appendLine(`计算结构体内容替换范围，当前位置: ${position.line}:${position.character}`);
 
-        // 使用更精确的算法来找到当前光标所在结构体的开大括号和闭大括号
-        let openBracePos: vscode.Position | null = null;
-        let closeBracePos: vscode.Position | null = null;
+        // 首先在当前行查找结构体初始化的大括号对
+        const currentLine = document.lineAt(position.line);
+        const currentLineText = currentLine.text;
 
-        // 第1步：向上查找最近的开大括号
-        for (let lineNum = position.line; lineNum >= 0; lineNum--) {
-            const lineText = document.lineAt(lineNum).text;
+        outputChannel.appendLine(`当前行文本: "${currentLineText}"`);
 
-            if (lineNum === position.line) {
-                // 在当前行中，只查找光标位置之前的大括号
-                for (let charPos = Math.min(position.character, lineText.length - 1); charPos >= 0; charPos--) {
-                    if (lineText[charPos] === '{') {
-                        openBracePos = new vscode.Position(lineNum, charPos);
-                        break;
-                    }
-                }
-            } else {
-                // 在其他行中，查找最后一个开大括号
-                const braceIndex = lineText.lastIndexOf('{');
-                if (braceIndex !== -1) {
-                    openBracePos = new vscode.Position(lineNum, braceIndex);
-                    break;
-                }
+        // 查找当前行中的结构体初始化模式
+        const structInitPattern = /(\w+)\s*:=\s*(?:&?)([\w\.]+)\s*\{/;
+        const match = structInitPattern.exec(currentLineText);
+
+        if (match) {
+            const structName = match[2];
+            const braceIndex = currentLineText.indexOf('{');
+
+            outputChannel.appendLine(`在当前行找到结构体初始化: ${structName}, 大括号位置: ${braceIndex}`);
+
+            // 检查是否是同一行的简单结构体初始化 (如 d1 := ddd{})
+            const closeBraceIndex = currentLineText.indexOf('}', braceIndex);
+            if (closeBraceIndex !== -1) {
+                // 同一行的结构体初始化
+                const openBracePos = new vscode.Position(position.line, braceIndex);
+                const closeBracePos = new vscode.Position(position.line, closeBraceIndex);
+
+                outputChannel.appendLine(`找到同一行的结构体初始化，开大括号: ${openBracePos.line}:${openBracePos.character}, 闭大括号: ${closeBracePos.line}:${closeBracePos.character}`);
+
+                // 对于同一行的结构体初始化，我们需要特殊处理
+                // 标记这是一个需要换行格式的同一行初始化
+                const replaceStart = new vscode.Position(position.line, braceIndex + 1);
+                const replaceEnd = new vscode.Position(position.line, closeBraceIndex);
+
+                const replaceRange = new vscode.Range(replaceStart, replaceEnd);
+
+                outputChannel.appendLine(`计算出的精确替换范围: ${replaceRange.start.line}:${replaceRange.start.character} - ${replaceRange.end.line}:${replaceRange.end.character}`);
+
+                const currentContent = document.getText(replaceRange);
+                outputChannel.appendLine(`当前要替换的内容:\n"${currentContent}"`);
+
+                // 在范围对象上添加一个标记，表示这是同一行的初始化
+                (replaceRange as any).isSameLineInit = true;
+
+                return replaceRange;
             }
         }
 
-        if (!openBracePos) {
-            outputChannel.appendLine('未找到开大括号');
+        // 如果不是同一行的结构体初始化，使用统一的大括号范围查找
+        const braceRange = findStructBraceRange(document, position, outputChannel);
+        if (!braceRange) {
+            outputChannel.appendLine('无法找到结构体大括号范围');
             return null;
         }
+
+        const { openBraceLine, closeBraceLine } = braceRange;
+
+        // 找到开大括号和闭大括号的精确位置
+        const openBraceLineText = document.lineAt(openBraceLine).text;
+        const openBraceCharPos = openBraceLineText.indexOf('{');
+
+        const closeBraceLineText = document.lineAt(closeBraceLine).text;
+        const closeBraceCharPos = closeBraceLineText.lastIndexOf('}');
+
+        const openBracePos = new vscode.Position(openBraceLine, openBraceCharPos);
+        const closeBracePos = new vscode.Position(closeBraceLine, closeBraceCharPos);
 
         outputChannel.appendLine(`找到开大括号位置: ${openBracePos.line}:${openBracePos.character}`);
-
-        // 第2步：从开大括号位置开始，向下查找匹配的闭大括号
-        let braceCount = 0;
-        let found = false;
-
-        for (let lineNum = openBracePos.line; lineNum < document.lineCount && !found; lineNum++) {
-            const lineText = document.lineAt(lineNum).text;
-
-            // 确定在当前行中开始查找的位置
-            let startPos = 0;
-            if (lineNum === openBracePos.line) {
-                startPos = openBracePos.character; // 从开大括号位置开始
-            }
-
-            for (let charPos = startPos; charPos < lineText.length; charPos++) {
-                const char = lineText[charPos];
-
-                if (char === '{') {
-                    braceCount++;
-                } else if (char === '}') {
-                    braceCount--;
-
-                    // 当计数为0时，找到了匹配的闭大括号
-                    if (braceCount === 0) {
-                        closeBracePos = new vscode.Position(lineNum, charPos);
-                        found = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (!closeBracePos) {
-            outputChannel.appendLine('未找到匹配的闭大括号');
-            return null;
-        }
-
         outputChannel.appendLine(`找到闭大括号位置: ${closeBracePos.line}:${closeBracePos.character}`);
 
-        // 第3步：计算需要替换的精确范围，避免多余的空行
+        // 计算需要替换的精确范围
         let replaceStart: vscode.Position;
         let replaceEnd: vscode.Position;
 
-        // 计算开始位置：寻找第一个有内容的行或者开大括号后的位置
-        const openBraceLine = document.lineAt(openBracePos.line);
-        const textAfterOpenBrace = openBraceLine.text.substring(openBracePos.character + 1).trim();
+        // 如果开大括号和闭大括号在同一行
+        if (openBracePos.line === closeBracePos.line) {
+            replaceStart = new vscode.Position(openBracePos.line, openBracePos.character + 1);
+            replaceEnd = new vscode.Position(closeBracePos.line, closeBracePos.character);
+        } else {
+            // 跨行的结构体初始化
+            const openBraceLine = document.lineAt(openBracePos.line);
+            const textAfterOpenBrace = openBraceLine.text.substring(openBracePos.character + 1).trim();
 
-        if (textAfterOpenBrace === '') {
-            // 开大括号后是空的，寻找第一个有内容的行
-            let firstContentLine = openBracePos.line + 1;
-            while (firstContentLine < closeBracePos.line) {
-                const lineText = document.lineAt(firstContentLine).text.trim();
-                if (lineText !== '') {
-                    break;
-                }
-                firstContentLine++;
-            }
-
-            if (firstContentLine < closeBracePos.line) {
-                // 找到了有内容的行，从该行开始
-                replaceStart = new vscode.Position(firstContentLine, 0);
+            if (textAfterOpenBrace === '') {
+                // 开大括号后是空的，从下一行开始
+                replaceStart = new vscode.Position(openBracePos.line + 1, 0);
             } else {
-                // 没有找到内容行，从开大括号后开始
+                // 开大括号后有内容，从开大括号后开始
                 replaceStart = new vscode.Position(openBracePos.line, openBracePos.character + 1);
             }
-        } else {
-            // 开大括号后有内容，从开大括号后开始
-            replaceStart = new vscode.Position(openBracePos.line, openBracePos.character + 1);
-        }
 
-        // 计算结束位置：寻找最后一个有内容的行或者闭大括号前的位置
-        const closeBraceLine = document.lineAt(closeBracePos.line);
-        const textBeforeCloseBrace = closeBraceLine.text.substring(0, closeBracePos.character).trim();
+            // 计算结束位置
+            const closeBraceLine = document.lineAt(closeBracePos.line);
+            const textBeforeCloseBrace = closeBraceLine.text.substring(0, closeBracePos.character).trim();
 
-        if (textBeforeCloseBrace === '') {
-            // 闭大括号前是空的，寻找最后一个有内容的行
-            let lastContentLine = closeBracePos.line - 1;
-            while (lastContentLine > openBracePos.line) {
-                const lineText = document.lineAt(lastContentLine).text.trim();
-                if (lineText !== '') {
-                    break;
+            if (textBeforeCloseBrace === '') {
+                // 闭大括号前是空的，到前一行末尾
+                if (closeBracePos.line > 0) {
+                    const prevLineText = document.lineAt(closeBracePos.line - 1).text;
+                    replaceEnd = new vscode.Position(closeBracePos.line - 1, prevLineText.length);
+                } else {
+                    replaceEnd = new vscode.Position(closeBracePos.line, closeBracePos.character);
                 }
-                lastContentLine--;
-            }
-
-            if (lastContentLine > openBracePos.line) {
-                // 找到了有内容的行，到该行末尾
-                const lastContentLineText = document.lineAt(lastContentLine).text;
-                replaceEnd = new vscode.Position(lastContentLine, lastContentLineText.length);
             } else {
-                // 没有找到内容行，到闭大括号前
+                // 闭大括号前有内容，到闭大括号前
                 replaceEnd = new vscode.Position(closeBracePos.line, closeBracePos.character);
             }
-        } else {
-            // 闭大括号前有内容，到闭大括号前
-            replaceEnd = new vscode.Position(closeBracePos.line, closeBracePos.character);
         }
 
         const replaceRange = new vscode.Range(replaceStart, replaceEnd);
@@ -1358,6 +1354,84 @@ function findOptimalCompletionPosition(
 }
 
 /**
+ * 统一的结构体大括号范围查找函数
+ * 返回结构体的开大括号和闭大括号位置
+ */
+function findStructBraceRange(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    outputChannel: vscode.OutputChannel
+): { openBraceLine: number, closeBraceLine: number } | null {
+
+    outputChannel.appendLine(`开始查找结构体大括号范围，光标位置: ${position.line}:${position.character}`);
+
+    // 向上查找开大括号，扩大搜索范围到50行
+    let openBraceLine = -1;
+    for (let lineNum = position.line; lineNum >= Math.max(0, position.line - 50); lineNum--) {
+        const lineText = document.lineAt(lineNum).text;
+
+        // 查找包含结构体初始化的大括号
+        if (lineText.includes('{')) {
+            // 验证这是一个结构体初始化的大括号
+            const beforeBrace = lineText.substring(0, lineText.indexOf('{')).trim();
+
+            // 支持多种结构体初始化模式
+            if (beforeBrace.match(/var\s+\w+\s*=\s*[\w\.]+$/) ||           // var x = StructName
+                beforeBrace.match(/\w+\s*:=\s*[\w\.]+$/) ||               // x := StructName
+                beforeBrace.match(/\w+\s*:\s*[\w\.]+$/) ||                // field: StructName
+                beforeBrace.match(/\b[\w\.]+$/) ||                        // StructName (数组元素等)
+                beforeBrace.match(/\(\s*[\w\.]+$/) ||                     // func(StructName
+                beforeBrace.match(/,\s*[\w\.]+$/) ||                      // , StructName
+                beforeBrace.match(/\[\]\s*[\w\.]+$/)) {                   // []StructName
+
+                openBraceLine = lineNum;
+                outputChannel.appendLine(`找到有效的结构体开大括号行 ${lineNum}: "${lineText}"`);
+                break;
+            }
+        }
+    }
+
+    if (openBraceLine === -1) {
+        outputChannel.appendLine('未找到有效的结构体开大括号');
+        return null;
+    }
+
+    // 向下查找闭大括号，使用大括号匹配算法
+    let closeBraceLine = -1;
+    let braceCount = 0;
+    let found = false;
+
+    for (let lineNum = openBraceLine; lineNum < Math.min(document.lineCount, openBraceLine + 50) && !found; lineNum++) {
+        const lineText = document.lineAt(lineNum).text;
+
+        for (let charPos = 0; charPos < lineText.length; charPos++) {
+            const char = lineText[charPos];
+
+            if (char === '{') {
+                braceCount++;
+            } else if (char === '}') {
+                braceCount--;
+
+                // 当计数为0时，找到了匹配的闭大括号
+                if (braceCount === 0) {
+                    closeBraceLine = lineNum;
+                    found = true;
+                    outputChannel.appendLine(`找到匹配的闭大括号行 ${lineNum}: "${lineText}"`);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (closeBraceLine === -1) {
+        outputChannel.appendLine('未找到匹配的闭大括号');
+        return null;
+    }
+
+    return { openBraceLine, closeBraceLine };
+}
+
+/**
  * 解析当前结构体中已有的字段和值
  * 支持复杂的嵌套结构体值解析
  */
@@ -1370,39 +1444,14 @@ function parseExistingStructFields(
 
     outputChannel.appendLine(`开始解析已存在字段，光标位置: ${position.line}:${position.character}`);
 
-    // 找到结构体初始化的开大括号和闭大括号
-    let openBraceLine = -1;
-    let closeBraceLine = -1;
-
-    // 向上查找开大括号
-    for (let lineNum = position.line; lineNum >= Math.max(0, position.line - 10); lineNum--) {
-        const lineText = document.lineAt(lineNum).text;
-        if (lineText.includes('{')) {
-            openBraceLine = lineNum;
-            outputChannel.appendLine(`找到开大括号行 ${lineNum}: "${lineText}"`);
-            break;
-        }
-    }
-
-    if (openBraceLine === -1) {
-        outputChannel.appendLine('未找到开大括号，无法解析字段');
+    // 使用统一的大括号范围查找函数
+    const braceRange = findStructBraceRange(document, position, outputChannel);
+    if (!braceRange) {
+        outputChannel.appendLine('无法找到结构体大括号范围，无法解析字段');
         return fields;
     }
 
-    // 向下查找闭大括号
-    for (let lineNum = openBraceLine; lineNum < Math.min(document.lineCount, openBraceLine + 20); lineNum++) {
-        const lineText = document.lineAt(lineNum).text;
-        if (lineText.includes('}')) {
-            closeBraceLine = lineNum;
-            outputChannel.appendLine(`找到闭大括号行 ${lineNum}: "${lineText}"`);
-            break;
-        }
-    }
-
-    if (closeBraceLine === -1) {
-        outputChannel.appendLine('未找到闭大括号，无法解析字段');
-        return fields;
-    }
+    const { openBraceLine, closeBraceLine } = braceRange;
 
     // 解析开大括号和闭大括号之间的字段
     for (let lineNum = openBraceLine; lineNum <= closeBraceLine; lineNum++) {
