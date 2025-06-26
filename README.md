@@ -918,35 +918,6 @@ user := User{
 
 - 通过`vscode.window.showInformationMessage('<通知内容>')`实现VSCode的通知
 
-## 未来改进
-
-**欢迎感兴趣的朋友，参与改进。**
-
-1. **更多场景支持**
-   - 结构体作为返回值：`return StructName{}`
-   - 接口实现：`var i Interface = StructName{}`
-   - 类型断言：`value.(StructName{})`
-
-2. **智能字段推荐**
-   - 根据上下文推荐字段值
-   - 支持从注释中提取默认值
-   - 支持字段值的智能补全
-
-3. **代码格式化增强**
-   - 更智能的缩进处理
-   - 支持自定义代码风格
-   - 与gofmt更好的集成
-
-4. **性能优化**
-   - 缓存结构体信息
-   - 异步处理大型结构体
-   - 减少API调用次数
-
-5. **用户体验改进**
-   - 可视化的字段选择界面
-   - 支持字段排序和过滤
-   - 快捷键自定义
-
 ## 反馈与贡献
 
 如果你在使用过程中遇到任何问题，或者有改进建议，欢迎在 [GitHub Issues](https://github.com/leeprince/go-struct-auto-fill.git) 中提交问题。
