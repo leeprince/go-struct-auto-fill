@@ -4,6 +4,19 @@ import * as vscode from 'vscode';
 
 const execAsync = promisify(exec);
 
+// 日志开关判断
+function shouldLog(): boolean {
+    const config = vscode.workspace.getConfiguration('go-struct-auto-fill');
+    return config.get<boolean>('enableLog', false);
+}
+
+// 安全日志输出
+function safeLog(outputChannel: vscode.OutputChannel, message: string) {
+    if (shouldLog()) {
+        outputChannel.appendLine(message);
+    }
+}
+
 /**
  * 结构体字段接口
  */
@@ -69,17 +82,19 @@ export function activate(context: vscode.ExtensionContext) {
 
     // 注册命令
     let disposable = vscode.commands.registerCommand('go-struct-auto-fill.fillStruct', async () => {
-        outputChannel.clear();
-        outputChannel.show();
-        outputChannel.appendLine('开始执行结构体自动填充...');
+        if (shouldLog()) {
+            outputChannel.clear();
+            outputChannel.show();
+        }
+        safeLog(outputChannel, '开始执行结构体自动填充...');
 
         // 检查 Go 插件是否激活
         if (!goExtension.isActive) {
             try {
                 await goExtension.activate();
-                outputChannel.appendLine('Go 插件已激活');
+                safeLog(outputChannel, 'Go 插件已激活');
             } catch (error) {
-                outputChannel.appendLine(`Go 插件激活失败: ${error}`);
+                safeLog(outputChannel, `Go 插件激活失败: ${error}`);
                 vscode.window.showErrorMessage('Go 插件激活失败');
                 return;
             }
@@ -88,7 +103,7 @@ export function activate(context: vscode.ExtensionContext) {
         // 获取当前编辑器
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
-            outputChannel.appendLine('未找到活动编辑器');
+            safeLog(outputChannel, '未找到活动编辑器');
             return;
         }
 
@@ -99,26 +114,26 @@ export function activate(context: vscode.ExtensionContext) {
         const line = document.lineAt(position.line);
         const text = line.text;
 
-        outputChannel.appendLine(`当前行文本: ${text}`);
-        outputChannel.appendLine(`光标位置: ${position.line}:${position.character}`);
+        safeLog(outputChannel, `当前行文本: ${text}`);
+        safeLog(outputChannel, `光标位置: ${position.line}:${position.character}`);
 
         // 使用新的结构体识别逻辑
         const matchResult = identifyStructInitialization(document, position, outputChannel);
 
         if (!matchResult) {
-            outputChannel.appendLine('无法识别结构体初始化语句');
+            safeLog(outputChannel, '无法识别结构体初始化语句');
             vscode.window.showErrorMessage('无法识别结构体初始化语句，请确保光标位于结构体初始化的大括号内');
             return;
         }
 
         const { structName, isNestedStruct, matchType } = matchResult;
-        outputChannel.appendLine(`找到结构体: ${structName}, 类型: ${matchType}, 是否嵌套: ${isNestedStruct}`);
+        safeLog(outputChannel, `找到结构体: ${structName}, 类型: ${matchType}, 是否嵌套: ${isNestedStruct}`);
 
         try {
-            outputChannel.appendLine('正在获取结构体信息...');
+            safeLog(outputChannel, '正在获取结构体信息...');
 
             // 不创建临时文档，直接在当前文档中获取补全项
-            outputChannel.appendLine('尝试在当前文档中直接获取结构体字段补全项，不创建任何临时文件');
+            safeLog(outputChannel, '尝试在当前文档中直接获取结构体字段补全项，不创建任何临时文件');
 
             // 优化补全位置的计算，适应不同的结构体初始化场景
             let completionPosition = position;
@@ -134,21 +149,21 @@ export function activate(context: vscode.ExtensionContext) {
             // 使用 gopls 的 API 获取结构体信息（原有逻辑，用于普通变量初始化）
             let completionItems;
             try {
-                outputChannel.appendLine(`尝试在当前文档 ${document.uri.toString()} 的位置 ${completionPosition.line}:${completionPosition.character} 获取补全项`);
+                safeLog(outputChannel, `尝试在当前文档 ${document.uri.toString()} 的位置 ${completionPosition.line}:${completionPosition.character} 获取补全项`);
                 completionItems = await vscode.commands.executeCommand<vscode.CompletionList>(
                     'vscode.executeCompletionItemProvider',
                     document.uri,
                     completionPosition
                 );
             } catch (err) {
-                outputChannel.appendLine(`获取补全项时出错: ${err}`);
+                safeLog(outputChannel, `获取补全项时出错: ${err}`);
             }
 
-            outputChannel.appendLine(`补全项类型: ${typeof completionItems}`);
-            outputChannel.appendLine(`补全项: ${JSON.stringify(completionItems, null, 2)}`);
+            safeLog(outputChannel, `补全项类型: ${typeof completionItems}`);
+            safeLog(outputChannel, `补全项: ${JSON.stringify(completionItems, null, 2)}`);
 
             if (!completionItems || !completionItems.items || !Array.isArray(completionItems.items) || completionItems.items.length === 0) {
-                outputChannel.appendLine('未获取到有效的补全项');
+                safeLog(outputChannel, '未获取到有效的补全项');
                 vscode.window.showErrorMessage('无法获取结构体信息，请确保 Go 插件已正确安装并运行');
                 return;
             }
@@ -166,19 +181,19 @@ export function activate(context: vscode.ExtensionContext) {
             );
 
             if (!orderedFieldsCode) {
-                outputChannel.appendLine('没有生成任何字段代码');
+                safeLog(outputChannel, '没有生成任何字段代码');
                 vscode.window.showErrorMessage('无法生成结构体字段代码');
                 return;
             }
 
             if (addedFields.length === 0) {
-                outputChannel.appendLine('没有需要填充的新字段');
+                safeLog(outputChannel, '没有需要填充的新字段');
                 vscode.window.showInformationMessage('结构体字段已全部填充');
                 return;
             }
 
-            outputChannel.appendLine(`新添加的字段: [${addedFields.join(', ')}]`);
-            outputChannel.appendLine(`最终生成的有序代码:\n${orderedFieldsCode}`);
+            safeLog(outputChannel, `新添加的字段: [${addedFields.join(', ')}]`);
+            safeLog(outputChannel, `最终生成的有序代码:\n${orderedFieldsCode}`);
 
             // 替换整个结构体内容而不是简单追加
             await editor.edit(editBuilder => {
@@ -190,30 +205,30 @@ export function activate(context: vscode.ExtensionContext) {
 
                     if (isSameLineInit) {
                         // 对于同一行的结构体初始化，需要添加换行符
-                        outputChannel.appendLine('检测到同一行结构体初始化，添加换行格式');
+                        safeLog(outputChannel, '检测到同一行结构体初始化，添加换行格式');
                         finalCode = '\n' + orderedFieldsCode + '\n' + (document.lineAt(replaceRange.start.line).text.match(/^(\s*)/)?.[1] || '');
                     }
 
                     // 替换整个结构体内容
                     editBuilder.replace(replaceRange, finalCode);
-                    outputChannel.appendLine(`已替换结构体内容，范围: ${replaceRange.start.line}:${replaceRange.start.character} - ${replaceRange.end.line}:${replaceRange.end.character}`);
+                    safeLog(outputChannel, `已替换结构体内容，范围: ${replaceRange.start.line}:${replaceRange.start.character} - ${replaceRange.end.line}:${replaceRange.end.character}`);
                 } else {
                     // 如果无法确定替换范围，使用插入模式（兼容性处理）
                     const insertPosition = calculateInsertPosition(document, position, matchType, outputChannel);
                     editBuilder.insert(insertPosition, '\n' + orderedFieldsCode);
-                    outputChannel.appendLine(`已在 ${insertPosition.line}:${insertPosition.character} 插入代码（兼容模式）`);
+                    safeLog(outputChannel, `已在 ${insertPosition.line}:${insertPosition.character} 插入代码（兼容模式）`);
                 }
             });
 
             const message = `已按结构体定义顺序填充 ${addedFields.length} 个字段: ${addedFields.join(', ')}`;
-            outputChannel.appendLine('结构体字段按顺序填充完成');
+            safeLog(outputChannel, '结构体字段按顺序填充完成');
             vscode.window.showInformationMessage(message);
         } catch (error) {
-            outputChannel.appendLine(`错误类型: ${typeof error}`);
-            outputChannel.appendLine(`错误: ${error}`);
+            safeLog(outputChannel, `错误类型: ${typeof error}`);
+            safeLog(outputChannel, `错误: ${error}`);
             if (error instanceof Error) {
-                outputChannel.appendLine(`错误详情: ${error.message}`);
-                outputChannel.appendLine(`错误堆栈: ${error.stack}`);
+                safeLog(outputChannel, `错误详情: ${error.message}`);
+                safeLog(outputChannel, `错误堆栈: ${error.stack}`);
             }
             vscode.window.showErrorMessage(`获取结构体信息时出错: ${error instanceof Error ? error.message : '未知错误'}`);
         }
@@ -235,7 +250,7 @@ function identifyStructInitialization(
     const currentLine = document.lineAt(position.line);
     const currentLineText = currentLine.text;
 
-    outputChannel.appendLine(`开始识别结构体初始化，当前行: ${currentLineText}`);
+    safeLog(outputChannel, `开始识别结构体初始化，当前行: ${currentLineText}`);
 
     // 首先尝试简化逻辑：直接从当前光标位置向上查找结构体声明
     const structResult = findStructDeclarationSimple(document, position, outputChannel);
@@ -244,7 +259,7 @@ function identifyStructInitialization(
     }
 
     // 如果简化查找失败，使用更强大的上下文分析作为备选方案
-    outputChannel.appendLine('简化查找失败，尝试使用上下文分析');
+    safeLog(outputChannel, '简化查找失败，尝试使用上下文分析');
     const contextResult = analyzeStructContext(document, position, outputChannel);
     if (contextResult) {
         return contextResult;
@@ -263,12 +278,12 @@ function findStructDeclarationSimple(
     outputChannel: vscode.OutputChannel
 ): StructMatchResult | null {
 
-    outputChannel.appendLine(`开始简化的结构体声明查找，光标位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `开始简化的结构体声明查找，光标位置: ${position.line}:${position.character}`);
 
     // 从当前行开始向上查找，最多查找50行（支持更大的结构体）
     for (let lineNum = position.line; lineNum >= Math.max(0, position.line - 50); lineNum--) {
         const lineText = document.lineAt(lineNum).text;
-        outputChannel.appendLine(`检查行 ${lineNum}: "${lineText}"`);
+        safeLog(outputChannel, `检查行 ${lineNum}: "${lineText}"`);
 
         // 查找结构体初始化模式，支持包名
         const patterns = [
@@ -301,7 +316,7 @@ function findStructDeclarationSimple(
                 }
 
                 if (structName) {
-                    outputChannel.appendLine(`找到结构体初始化: ${structName} (模式: ${pattern})`);
+                    safeLog(outputChannel, `找到结构体初始化: ${structName} (模式: ${pattern})`);
 
                     // 确定匹配类型
                     let matchType: 'variable' | 'nested' | 'array' | 'map' | 'append' | 'function_param' = 'variable';
@@ -325,7 +340,7 @@ function findStructDeclarationSimple(
         }
     }
 
-    outputChannel.appendLine('未找到结构体初始化声明');
+    safeLog(outputChannel, '未找到结构体初始化声明');
     return null;
 }
 
@@ -339,7 +354,7 @@ function analyzeStructContext(
     outputChannel: vscode.OutputChannel
 ): StructMatchResult | null {
 
-    outputChannel.appendLine(`开始分析结构体上下文，光标位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `开始分析结构体上下文，光标位置: ${position.line}:${position.character}`);
 
     // 从当前位置向上查找，分析大括号匹配和结构体声明
     let braceStack: Array<{ line: number, char: number, type: 'open' | 'close' }> = [];
@@ -382,7 +397,7 @@ function analyzeStructContext(
                     // 找到了一个未匹配的开括号，这可能是我们要找的结构体
                     const structMatch = findStructDeclarationBeforeBrace(document, lineNum, charPos, outputChannel);
                     if (structMatch) {
-                        outputChannel.appendLine(`找到匹配的结构体声明在行 ${lineNum}:${charPos}`);
+                        safeLog(outputChannel, `找到匹配的结构体声明在行 ${lineNum}:${charPos}`);
                         return structMatch;
                     }
                 }
@@ -390,7 +405,7 @@ function analyzeStructContext(
         }
     }
 
-    outputChannel.appendLine('未找到匹配的结构体上下文');
+    safeLog(outputChannel, '未找到匹配的结构体上下文');
     return null;
 }
 
@@ -408,13 +423,13 @@ function findStructDeclarationBeforeBrace(
     const braceLineText = document.lineAt(braceLineNum).text;
     const textBeforeBrace = braceLineText.substring(0, braceCharPos).trim();
 
-    outputChannel.appendLine(`分析大括号前的文本: "${textBeforeBrace}"`);
+    safeLog(outputChannel, `分析大括号前的文本: "${textBeforeBrace}"`);
 
     // 检查是否是嵌套结构体字段赋值 - 支持包名
     const nestedFieldMatch = textBeforeBrace.match(/(\w+):\s*&?([\w\.]+)$/);
     if (nestedFieldMatch) {
         const structName = nestedFieldMatch[2];
-        outputChannel.appendLine(`找到嵌套结构体字段: ${nestedFieldMatch[1]}: ${structName}`);
+        safeLog(outputChannel, `找到嵌套结构体字段: ${nestedFieldMatch[1]}: ${structName}`);
         return {
             structName,
             isNestedStruct: true,
@@ -429,7 +444,7 @@ function findStructDeclarationBeforeBrace(
         textBeforeBrace.match(/\w+\s*:=\s*\[\]\s*([\w\.]+)$/);
     if (arrayMatch) {
         const structName = arrayMatch[1];
-        outputChannel.appendLine(`找到数组结构体初始化: ${structName}`);
+        safeLog(outputChannel, `找到数组结构体初始化: ${structName}`);
         return {
             structName,
             isNestedStruct: false,
@@ -443,7 +458,7 @@ function findStructDeclarationBeforeBrace(
         textBeforeBrace.match(/"[^"]*":\s*([\w\.]+)$/);
     if (mapMatch) {
         const structName = mapMatch[1];
-        outputChannel.appendLine(`找到map结构体初始化: ${structName}`);
+        safeLog(outputChannel, `找到map结构体初始化: ${structName}`);
         return {
             structName,
             isNestedStruct: false,
@@ -456,7 +471,7 @@ function findStructDeclarationBeforeBrace(
         textBeforeBrace.match(/append\([^,]+,\s*[^,]*,\s*([\w\.]+)$/);
     if (appendMatch) {
         const structName = appendMatch[1];
-        outputChannel.appendLine(`找到append结构体初始化: ${structName}`);
+        safeLog(outputChannel, `找到append结构体初始化: ${structName}`);
         return {
             structName,
             isNestedStruct: false,
@@ -469,7 +484,7 @@ function findStructDeclarationBeforeBrace(
         textBeforeBrace.match(/\w+\([^)]*,\s*([\w\.]+)$/);
     if (funcParamMatch) {
         const structName = funcParamMatch[1];
-        outputChannel.appendLine(`找到函数参数结构体初始化: ${structName}`);
+        safeLog(outputChannel, `找到函数参数结构体初始化: ${structName}`);
         return {
             structName,
             isNestedStruct: false,
@@ -481,7 +496,7 @@ function findStructDeclarationBeforeBrace(
     const variableMatch = textBeforeBrace.match(/(?:var\s+)?(\w+)\s*(?:=|:=)\s*&?([\w\.]+)$/);
     if (variableMatch) {
         const structName = variableMatch[2];
-        outputChannel.appendLine(`找到普通变量结构体初始化: ${structName}`);
+        safeLog(outputChannel, `找到普通变量结构体初始化: ${structName}`);
         return {
             structName,
             isNestedStruct: false,
@@ -493,7 +508,7 @@ function findStructDeclarationBeforeBrace(
     const structNameMatch = textBeforeBrace.match(/^([\w\.]+)$/);
     if (structNameMatch) {
         const structName = structNameMatch[1];
-        outputChannel.appendLine(`检测到单独的结构体名称: ${structName}，开始上下文分析`);
+        safeLog(outputChannel, `检测到单独的结构体名称: ${structName}，开始上下文分析`);
 
         // 向上查找上下文来确定这是什么类型的初始化
         const contextResult = analyzeStructContextByLookingUp(document, braceLineNum, structName, outputChannel);
@@ -506,7 +521,7 @@ function findStructDeclarationBeforeBrace(
     const variableDeclaration = findVariableDeclarationBeforeBrace(document, braceLineNum, braceCharPos, outputChannel);
     if (variableDeclaration) {
         const structName = variableDeclaration[2];
-        outputChannel.appendLine(`找到跨行变量结构体初始化: ${structName}`);
+        safeLog(outputChannel, `找到跨行变量结构体初始化: ${structName}`);
         return {
             structName,
             isNestedStruct: false,
@@ -534,7 +549,7 @@ function analyzeStructContextByLookingUp(
     outputChannel: vscode.OutputChannel
 ): StructMatchResult | null {
 
-    outputChannel.appendLine(`开始向上查找 "${structName}" 的上下文`);
+    safeLog(outputChannel, `开始向上查找 "${structName}" 的上下文`);
 
     // 转义结构体名称中的点号，用于正则表达式
     const escapedStructName = structName.replace(/\./g, '\\.');
@@ -542,7 +557,7 @@ function analyzeStructContextByLookingUp(
     // 向上查找最多10行来确定上下文
     for (let lineNum = braceLineNum - 1; lineNum >= Math.max(0, braceLineNum - 10); lineNum--) {
         const lineText = document.lineAt(lineNum).text;
-        outputChannel.appendLine(`检查行 ${lineNum}: "${lineText}"`);
+        safeLog(outputChannel, `检查行 ${lineNum}: "${lineText}"`);
 
         // 检查是否是数组声明 - 更灵活的模式匹配，支持包名
         const arrayPatterns = [
@@ -560,7 +575,7 @@ function analyzeStructContextByLookingUp(
 
         for (const pattern of arrayPatterns) {
             if (pattern.test(lineText)) {
-                outputChannel.appendLine(`找到数组上下文: ${structName} (模式: ${pattern})`);
+                safeLog(outputChannel, `找到数组上下文: ${structName} (模式: ${pattern})`);
                 return {
                     structName,
                     isNestedStruct: false,
@@ -585,7 +600,7 @@ function analyzeStructContextByLookingUp(
 
         for (const pattern of mapPatterns) {
             if (pattern.test(lineText)) {
-                outputChannel.appendLine(`找到map上下文: ${structName} (模式: ${pattern})`);
+                safeLog(outputChannel, `找到map上下文: ${structName} (模式: ${pattern})`);
                 return {
                     structName,
                     isNestedStruct: false,
@@ -607,7 +622,7 @@ function analyzeStructContextByLookingUp(
 
         for (const pattern of appendPatterns) {
             if (pattern.test(lineText)) {
-                outputChannel.appendLine(`找到append上下文: ${structName} (模式: ${pattern})`);
+                safeLog(outputChannel, `找到append上下文: ${structName} (模式: ${pattern})`);
                 return {
                     structName,
                     isNestedStruct: false,
@@ -629,7 +644,7 @@ function analyzeStructContextByLookingUp(
 
         for (const pattern of funcParamPatterns) {
             if (pattern.test(lineText)) {
-                outputChannel.appendLine(`找到函数参数上下文: ${structName} (模式: ${pattern})`);
+                safeLog(outputChannel, `找到函数参数上下文: ${structName} (模式: ${pattern})`);
                 return {
                     structName,
                     isNestedStruct: false,
@@ -640,7 +655,7 @@ function analyzeStructContextByLookingUp(
 
         // 新增：检查是否包含数组、map等关键字，即使格式不完全匹配
         if (lineText.includes('[]') && lineText.includes(structName)) {
-            outputChannel.appendLine(`通过关键字匹配找到数组上下文: ${structName}`);
+            safeLog(outputChannel, `通过关键字匹配找到数组上下文: ${structName}`);
             return {
                 structName,
                 isNestedStruct: false,
@@ -649,7 +664,7 @@ function analyzeStructContextByLookingUp(
         }
 
         if (lineText.includes('map[') && lineText.includes(structName)) {
-            outputChannel.appendLine(`通过关键字匹配找到map上下文: ${structName}`);
+            safeLog(outputChannel, `通过关键字匹配找到map上下文: ${structName}`);
             return {
                 structName,
                 isNestedStruct: false,
@@ -658,7 +673,7 @@ function analyzeStructContextByLookingUp(
         }
 
         if (lineText.includes('append(') && lineText.includes(structName)) {
-            outputChannel.appendLine(`通过关键字匹配找到append上下文: ${structName}`);
+            safeLog(outputChannel, `通过关键字匹配找到append上下文: ${structName}`);
             return {
                 structName,
                 isNestedStruct: false,
@@ -668,12 +683,12 @@ function analyzeStructContextByLookingUp(
 
         // 如果遇到其他赋值语句或函数声明，停止查找
         if (lineText.includes('func ') || (lineText.includes(':=') && !lineText.includes(structName))) {
-            outputChannel.appendLine(`遇到函数或其他赋值，停止查找`);
+            safeLog(outputChannel, `遇到函数或其他赋值，停止查找`);
             break;
         }
     }
 
-    outputChannel.appendLine(`未找到明确的上下文，默认为普通变量初始化`);
+    safeLog(outputChannel, `未找到明确的上下文，默认为普通变量初始化`);
     return {
         structName,
         isNestedStruct: false,
@@ -694,12 +709,12 @@ function findVariableDeclarationBeforeBrace(
     // 向上查找变量声明
     for (let lineNum = braceLineNum - 1; lineNum >= Math.max(0, braceLineNum - 3); lineNum--) {
         const lineText = document.lineAt(lineNum).text.trim();
-        outputChannel.appendLine(`向上查找变量声明，检查行 ${lineNum}: "${lineText}"`);
+        safeLog(outputChannel, `向上查找变量声明，检查行 ${lineNum}: "${lineText}"`);
 
         // 匹配变量声明模式 - 支持包名
         const variableMatch = lineText.match(/(?:var\s+)?(\w+)\s*(?:=|:=)\s*&?([\w\.]+)$/);
         if (variableMatch) {
-            outputChannel.appendLine(`找到跨行变量声明: ${variableMatch[1]} := ${variableMatch[2]}`);
+            safeLog(outputChannel, `找到跨行变量声明: ${variableMatch[1]} := ${variableMatch[2]}`);
             return variableMatch;
         }
 
@@ -737,7 +752,7 @@ function findMultiLineStructDeclaration(
     }
 
     combinedText = combinedText.trim().replace(/\s+/g, ' '); // 清理多余空格
-    outputChannel.appendLine(`分析合并后的文本: "${combinedText}"`);
+    safeLog(outputChannel, `分析合并后的文本: "${combinedText}"`);
 
     // 尝试匹配各种模式
     const patterns = [
@@ -807,7 +822,7 @@ function findMultiLineStructDeclaration(
                 matchType = 'variable';
             }
 
-            outputChannel.appendLine(`在跨行文本中找到结构体声明: ${structName}, 类型: ${matchType}, 匹配模式: ${pattern.regex}`);
+            safeLog(outputChannel, `在跨行文本中找到结构体声明: ${structName}, 类型: ${matchType}, 匹配模式: ${pattern.regex}`);
             return {
                 structName,
                 isNestedStruct: false,
@@ -822,7 +837,7 @@ function findMultiLineStructDeclaration(
         const word = words[i];
         // 检查是否是有效的Go结构体名称（首字母大写，支持包名）
         if (/^[A-Z][a-zA-Z0-9]*$/.test(word) || /^[a-z][a-zA-Z0-9]*\.[A-Z][a-zA-Z0-9]*$/.test(word)) {
-            outputChannel.appendLine(`尝试使用提取的结构体名称: ${word}`);
+            safeLog(outputChannel, `尝试使用提取的结构体名称: ${word}`);
 
             // 根据上下文推断类型
             let matchType: 'variable' | 'nested' | 'array' | 'map' | 'append' | 'function_param' = 'variable';
@@ -844,7 +859,7 @@ function findMultiLineStructDeclaration(
         }
     }
 
-    outputChannel.appendLine('在跨行文本中未找到匹配的结构体声明');
+    safeLog(outputChannel, '在跨行文本中未找到匹配的结构体声明');
     return null;
 }
 
@@ -858,7 +873,7 @@ function calculateInsertPosition(
     outputChannel: vscode.OutputChannel
 ): vscode.Position {
 
-    outputChannel.appendLine(`计算插入位置，匹配类型: ${matchType}, 当前位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `计算插入位置，匹配类型: ${matchType}, 当前位置: ${position.line}:${position.character}`);
 
     // 首先查找当前行中的左大括号位置
     const currentLine = document.lineAt(position.line);
@@ -868,7 +883,7 @@ function calculateInsertPosition(
     if (braceIndex !== -1) {
         // 如果当前行有左大括号，在其后插入
         const insertPosition = new vscode.Position(position.line, braceIndex + 1);
-        outputChannel.appendLine(`当前行找到左大括号，插入位置: ${position.line}:${braceIndex + 1}`);
+        safeLog(outputChannel, `当前行找到左大括号，插入位置: ${position.line}:${braceIndex + 1}`);
         return insertPosition;
     }
 
@@ -885,7 +900,7 @@ function calculateInsertPosition(
             if (textAfterBrace === '' || position.line > lineWithBrace) {
                 // 如果左大括号后面没有其他内容，或者当前行在左大括号之后的行
                 const insertPosition = new vscode.Position(lineWithBrace, checkBraceIndex + 1);
-                outputChannel.appendLine(`在行 ${lineWithBrace} 找到左大括号，插入位置: ${lineWithBrace}:${checkBraceIndex + 1}`);
+                safeLog(outputChannel, `在行 ${lineWithBrace} 找到左大括号，插入位置: ${lineWithBrace}:${checkBraceIndex + 1}`);
                 return insertPosition;
             }
         }
@@ -893,7 +908,7 @@ function calculateInsertPosition(
     }
 
     // 如果未找到合适的插入位置，使用当前光标位置
-    outputChannel.appendLine(`未找到合适的大括号，使用当前光标位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `未找到合适的大括号，使用当前光标位置: ${position.line}:${position.character}`);
     return position;
 }
 
@@ -907,13 +922,13 @@ function calculateStructContentRange(
     outputChannel: vscode.OutputChannel
 ): vscode.Range | null {
     try {
-        outputChannel.appendLine(`计算结构体内容替换范围，当前位置: ${position.line}:${position.character}`);
+        safeLog(outputChannel, `计算结构体内容替换范围，当前位置: ${position.line}:${position.character}`);
 
         // 首先在当前行查找结构体初始化的大括号对
         const currentLine = document.lineAt(position.line);
         const currentLineText = currentLine.text;
 
-        outputChannel.appendLine(`当前行文本: "${currentLineText}"`);
+        safeLog(outputChannel, `当前行文本: "${currentLineText}"`);
 
         // 查找当前行中的结构体初始化模式
         const structInitPattern = /(\w+)\s*:=\s*(?:&?)([\w\.]+)\s*\{/;
@@ -923,7 +938,7 @@ function calculateStructContentRange(
             const structName = match[2];
             const braceIndex = currentLineText.indexOf('{');
 
-            outputChannel.appendLine(`在当前行找到结构体初始化: ${structName}, 大括号位置: ${braceIndex}`);
+            safeLog(outputChannel, `在当前行找到结构体初始化: ${structName}, 大括号位置: ${braceIndex}`);
 
             // 检查是否是同一行的简单结构体初始化 (如 d1 := ddd{})
             const closeBraceIndex = currentLineText.indexOf('}', braceIndex);
@@ -932,7 +947,7 @@ function calculateStructContentRange(
                 const openBracePos = new vscode.Position(position.line, braceIndex);
                 const closeBracePos = new vscode.Position(position.line, closeBraceIndex);
 
-                outputChannel.appendLine(`找到同一行的结构体初始化，开大括号: ${openBracePos.line}:${openBracePos.character}, 闭大括号: ${closeBracePos.line}:${closeBracePos.character}`);
+                safeLog(outputChannel, `找到同一行的结构体初始化，开大括号: ${openBracePos.line}:${openBracePos.character}, 闭大括号: ${closeBracePos.line}:${closeBracePos.character}`);
 
                 // 对于同一行的结构体初始化，我们需要特殊处理
                 // 标记这是一个需要换行格式的同一行初始化
@@ -941,10 +956,10 @@ function calculateStructContentRange(
 
                 const replaceRange = new vscode.Range(replaceStart, replaceEnd);
 
-                outputChannel.appendLine(`计算出的精确替换范围: ${replaceRange.start.line}:${replaceRange.start.character} - ${replaceRange.end.line}:${replaceRange.end.character}`);
+                safeLog(outputChannel, `计算出的精确替换范围: ${replaceRange.start.line}:${replaceRange.start.character} - ${replaceRange.end.line}:${replaceRange.end.character}`);
 
                 const currentContent = document.getText(replaceRange);
-                outputChannel.appendLine(`当前要替换的内容:\n"${currentContent}"`);
+                safeLog(outputChannel, `当前要替换的内容:\n"${currentContent}"`);
 
                 // 在范围对象上添加一个标记，表示这是同一行的初始化
                 (replaceRange as any).isSameLineInit = true;
@@ -956,7 +971,7 @@ function calculateStructContentRange(
         // 如果不是同一行的结构体初始化，使用统一的大括号范围查找
         const braceRange = findStructBraceRange(document, position, outputChannel);
         if (!braceRange) {
-            outputChannel.appendLine('无法找到结构体大括号范围');
+            safeLog(outputChannel, '无法找到结构体大括号范围');
             return null;
         }
 
@@ -972,8 +987,8 @@ function calculateStructContentRange(
         const openBracePos = new vscode.Position(openBraceLine, openBraceCharPos);
         const closeBracePos = new vscode.Position(closeBraceLine, closeBraceCharPos);
 
-        outputChannel.appendLine(`找到开大括号位置: ${openBracePos.line}:${openBracePos.character}`);
-        outputChannel.appendLine(`找到闭大括号位置: ${closeBracePos.line}:${closeBracePos.character}`);
+        safeLog(outputChannel, `找到开大括号位置: ${openBracePos.line}:${openBracePos.character}`);
+        safeLog(outputChannel, `找到闭大括号位置: ${closeBracePos.line}:${closeBracePos.character}`);
 
         // 计算需要替换的精确范围
         let replaceStart: vscode.Position;
@@ -1016,16 +1031,16 @@ function calculateStructContentRange(
 
         const replaceRange = new vscode.Range(replaceStart, replaceEnd);
 
-        outputChannel.appendLine(`计算出的精确替换范围: ${replaceRange.start.line}:${replaceRange.start.character} - ${replaceRange.end.line}:${replaceRange.end.character}`);
+        safeLog(outputChannel, `计算出的精确替换范围: ${replaceRange.start.line}:${replaceRange.start.character} - ${replaceRange.end.line}:${replaceRange.end.character}`);
 
         // 输出要替换的内容用于调试
         const currentContent = document.getText(replaceRange);
-        outputChannel.appendLine(`当前要替换的内容:\n"${currentContent}"`);
+        safeLog(outputChannel, `当前要替换的内容:\n"${currentContent}"`);
 
         return replaceRange;
 
     } catch (error) {
-        outputChannel.appendLine(`计算结构体内容范围时出错: ${error}`);
+        safeLog(outputChannel, `计算结构体内容范围时出错: ${error}`);
         return null;
     }
 }
@@ -1041,20 +1056,20 @@ function generateFillCode(fields: GoField[], outputChannel: vscode.OutputChannel
     // 获取当前编辑器
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        outputChannel.appendLine('未找到活动编辑器');
+        safeLog(outputChannel, '未找到活动编辑器');
         return '';
     }
 
     const position = editor.selection.active;
     const document = editor.document;
 
-    outputChannel.appendLine(`开始生成代码，匹配类型: ${matchType}, 当前位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `开始生成代码，匹配类型: ${matchType}, 当前位置: ${position.line}:${position.character}`);
 
     // 分析缩进信息
     const indentInfo = analyzeIndentInfo(document, position, outputChannel);
-    outputChannel.appendLine(`使用${indentInfo.type}缩进，大小: ${indentInfo.size}`);
-    outputChannel.appendLine(`基础缩进: '${indentInfo.baseIndent}'`);
-    outputChannel.appendLine(`字段缩进: '${indentInfo.fieldIndent}'`);
+    safeLog(outputChannel, `使用${indentInfo.type}缩进，大小: ${indentInfo.size}`);
+    safeLog(outputChannel, `基础缩进: '${indentInfo.baseIndent}'`);
+    safeLog(outputChannel, `字段缩进: '${indentInfo.fieldIndent}'`);
 
     // 获取现有字段的对齐信息
     const existingFields = parseExistingStructFields(document, position, outputChannel);
@@ -1075,7 +1090,7 @@ function generateFillCode(fields: GoField[], outputChannel: vscode.OutputChannel
 
     // 如果没有字段，不生成代码
     if (fieldLines.length === 0) {
-        outputChannel.appendLine('没有字段需要填充');
+        safeLog(outputChannel, '没有字段需要填充');
         return '';
     }
 
@@ -1096,7 +1111,7 @@ function generateFillCode(fields: GoField[], outputChannel: vscode.OutputChannel
             break;
     }
 
-    outputChannel.appendLine(`生成的代码:\n${generatedCode}`);
+    safeLog(outputChannel, `生成的代码:\n${generatedCode}`);
     return generatedCode;
 }
 
@@ -1297,7 +1312,7 @@ function findOptimalCompletionPosition(
     matchType: string,
     outputChannel: vscode.OutputChannel
 ): vscode.Position | null {
-    outputChannel.appendLine(`为 ${structName} (类型: ${matchType}) 寻找最佳补全位置`);
+    safeLog(outputChannel, `为 ${structName} (类型: ${matchType}) 寻找最佳补全位置`);
 
     // 在当前位置附近寻找结构体初始化语句
     const currentLine = document.lineAt(position.line);
@@ -1309,7 +1324,7 @@ function findOptimalCompletionPosition(
         const braceIndex = currentLineText.indexOf('{');
         if (braceIndex !== -1) {
             const testPosition = new vscode.Position(position.line, braceIndex + 1);
-            outputChannel.appendLine(`在当前行找到结构体初始化，使用位置 ${position.line}:${braceIndex + 1}`);
+            safeLog(outputChannel, `在当前行找到结构体初始化，使用位置 ${position.line}:${braceIndex + 1}`);
             return testPosition;
         }
     }
@@ -1342,14 +1357,14 @@ function findOptimalCompletionPosition(
                     testPosition = new vscode.Position(targetLine, braceIndex + 1);
                 }
 
-                outputChannel.appendLine(`在行 ${targetLine} 找到结构体初始化，使用位置 ${testPosition.line}:${testPosition.character}`);
+                safeLog(outputChannel, `在行 ${targetLine} 找到结构体初始化，使用位置 ${testPosition.line}:${testPosition.character}`);
                 return testPosition;
             }
         }
     }
 
     // 如果没有找到特殊位置，返回当前位置
-    outputChannel.appendLine('未找到特殊的补全位置，使用当前光标位置');
+    safeLog(outputChannel, '未找到特殊的补全位置，使用当前光标位置');
     return null;
 }
 
@@ -1363,7 +1378,7 @@ function findStructBraceRange(
     outputChannel: vscode.OutputChannel
 ): { openBraceLine: number, closeBraceLine: number } | null {
 
-    outputChannel.appendLine(`开始查找结构体大括号范围，光标位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `开始查找结构体大括号范围，光标位置: ${position.line}:${position.character}`);
 
     // 向上查找开大括号，扩大搜索范围到50行
     let openBraceLine = -1;
@@ -1385,14 +1400,14 @@ function findStructBraceRange(
                 beforeBrace.match(/\[\]\s*[\w\.]+$/)) {                   // []StructName
 
                 openBraceLine = lineNum;
-                outputChannel.appendLine(`找到有效的结构体开大括号行 ${lineNum}: "${lineText}"`);
+                safeLog(outputChannel, `找到有效的结构体开大括号行 ${lineNum}: "${lineText}"`);
                 break;
             }
         }
     }
 
     if (openBraceLine === -1) {
-        outputChannel.appendLine('未找到有效的结构体开大括号');
+        safeLog(outputChannel, '未找到有效的结构体开大括号');
         return null;
     }
 
@@ -1416,7 +1431,7 @@ function findStructBraceRange(
                 if (braceCount === 0) {
                     closeBraceLine = lineNum;
                     found = true;
-                    outputChannel.appendLine(`找到匹配的闭大括号行 ${lineNum}: "${lineText}"`);
+                    safeLog(outputChannel, `找到匹配的闭大括号行 ${lineNum}: "${lineText}"`);
                     break;
                 }
             }
@@ -1424,7 +1439,7 @@ function findStructBraceRange(
     }
 
     if (closeBraceLine === -1) {
-        outputChannel.appendLine('未找到匹配的闭大括号');
+        safeLog(outputChannel, '未找到匹配的闭大括号');
         return null;
     }
 
@@ -1442,12 +1457,12 @@ function parseExistingStructFields(
 ): Map<string, string> {
     const fields = new Map<string, string>();
 
-    outputChannel.appendLine(`开始解析已存在字段，光标位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `开始解析已存在字段，光标位置: ${position.line}:${position.character}`);
 
     // 使用统一的大括号范围查找函数
     const braceRange = findStructBraceRange(document, position, outputChannel);
     if (!braceRange) {
-        outputChannel.appendLine('无法找到结构体大括号范围，无法解析字段');
+        safeLog(outputChannel, '无法找到结构体大括号范围，无法解析字段');
         return fields;
     }
 
@@ -1481,11 +1496,11 @@ function parseExistingStructFields(
             }
 
             fields.set(fieldName, fieldValue);
-            outputChannel.appendLine(`解析到字段: ${fieldName} = ${fieldValue}`);
+            safeLog(outputChannel, `解析到字段: ${fieldName} = ${fieldValue}`);
         }
     }
 
-    outputChannel.appendLine(`总共解析到 ${fields.size} 个已存在字段: [${Array.from(fields.keys()).join(', ')}]`);
+    safeLog(outputChannel, `总共解析到 ${fields.size} 个已存在字段: [${Array.from(fields.keys()).join(', ')}]`);
     return fields;
 }
 
@@ -1521,13 +1536,13 @@ function getStructFieldOrder(completionItems: vscode.CompletionList, outputChann
 
             // 过滤掉不可访问的字段
             if (inaccessibleFields.has(fieldName)) {
-                outputChannel.appendLine(`跳过不可访问字段: ${fieldName}`);
+                safeLog(outputChannel, `跳过不可访问字段: ${fieldName}`);
                 continue;
             }
 
             // 过滤掉以小写字母开头的私有字段
             if (fieldName[0] === fieldName[0].toLowerCase()) {
-                outputChannel.appendLine(`跳过私有字段: ${fieldName}`);
+                safeLog(outputChannel, `跳过私有字段: ${fieldName}`);
                 continue;
             }
 
@@ -1535,7 +1550,7 @@ function getStructFieldOrder(completionItems: vscode.CompletionList, outputChann
         }
     }
 
-    outputChannel.appendLine(`结构体字段定义顺序: [${fieldOrder.join(', ')}]`);
+    safeLog(outputChannel, `结构体字段定义顺序: [${fieldOrder.join(', ')}]`);
     return fieldOrder;
 }
 
@@ -1563,11 +1578,11 @@ async function generateOrderedFieldsCode(
 
     // 如果没有找到结构体定义，使用补全项顺序
     if (fieldDefinitions.length === 0) {
-        outputChannel.appendLine('没有找到结构体字段定义顺序，尝试使用补全项顺序');
+        safeLog(outputChannel, '没有找到结构体字段定义顺序，尝试使用补全项顺序');
         const fieldOrder = getStructFieldOrder(completionItems, outputChannel);
 
         if (fieldOrder.length === 0) {
-            outputChannel.appendLine('补全项中也没有找到字段');
+            safeLog(outputChannel, '补全项中也没有找到字段');
             return { code: '', addedFields: [] };
         }
 
@@ -1609,14 +1624,14 @@ async function generateOrderedFieldsCode(
         }
     });
 
-    outputChannel.appendLine(`所有可用字段: [${Array.from(allAvailableFields).join(', ')}]`);
-    outputChannel.appendLine(`已存在字段: [${Array.from(existingFields.keys()).join(', ')}]`);
+    safeLog(outputChannel, `所有可用字段: [${Array.from(allAvailableFields).join(', ')}]`);
+    safeLog(outputChannel, `已存在字段: [${Array.from(existingFields.keys()).join(', ')}]`);
 
     // 计算正确的缩进
     const indentInfo = calculateProperIndent(document, position, outputChannel);
     const { fieldIndent } = indentInfo;
 
-    outputChannel.appendLine(`使用的字段缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
+    safeLog(outputChannel, `使用的字段缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
 
     // 按照定义顺序生成字段代码
     const fieldLines: string[] = [];
@@ -1628,7 +1643,7 @@ async function generateOrderedFieldsCode(
         if (existingFields.has(fieldName)) {
             // 保留已有值
             fieldValue = existingFields.get(fieldName)!;
-            outputChannel.appendLine(`保留已有字段: ${fieldName} = ${fieldValue}`);
+            safeLog(outputChannel, `保留已有字段: ${fieldName} = ${fieldValue}`);
         } else {
             // 添加新字段
             let fieldType = fieldDef.type;
@@ -1645,7 +1660,7 @@ async function generateOrderedFieldsCode(
 
             fieldValue = getDefaultValueByType(fieldType);
             addedFields.push(fieldName);
-            outputChannel.appendLine(`添加新字段: ${fieldName} = ${fieldValue} (类型: ${fieldType})`);
+            safeLog(outputChannel, `添加新字段: ${fieldName} = ${fieldValue} (类型: ${fieldType})`);
         }
 
         fieldLines.push(`${fieldIndent}${fieldName}: ${fieldValue},`);
@@ -1657,9 +1672,9 @@ async function generateOrderedFieldsCode(
         code = fieldLines.join('\n');
     }
 
-    outputChannel.appendLine(`生成的完整有序字段代码:\n"${code}"`);
-    outputChannel.appendLine(`新添加的字段: [${addedFields.join(', ')}]`);
-    outputChannel.appendLine(`保留的已存在字段: [${Array.from(existingFields.keys()).join(', ')}]`);
+    safeLog(outputChannel, `生成的完整有序字段代码:\n"${code}"`);
+    safeLog(outputChannel, `新添加的字段: [${addedFields.join(', ')}]`);
+    safeLog(outputChannel, `保留的已存在字段: [${Array.from(existingFields.keys()).join(', ')}]`);
 
     return { code, addedFields };
 }
@@ -1672,16 +1687,16 @@ function calculateProperIndent(
     position: vscode.Position,
     outputChannel: vscode.OutputChannel
 ): { baseIndent: string, fieldIndent: string } {
-    outputChannel.appendLine(`开始计算缩进，当前位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `开始计算缩进，当前位置: ${position.line}:${position.character}`);
 
     // 获取当前行文本
     const currentLineText = document.lineAt(position.line).text;
-    outputChannel.appendLine(`当前行文本: '${currentLineText}'`);
+    safeLog(outputChannel, `当前行文本: '${currentLineText}'`);
 
     // 获取当前行缩进
     const currentIndentMatch = currentLineText.match(/^(\s*)/);
     const currentIndent = currentIndentMatch ? currentIndentMatch[1] : '';
-    outputChannel.appendLine(`当前行缩进: '${currentIndent}' (长度: ${currentIndent.length})`);
+    safeLog(outputChannel, `当前行缩进: '${currentIndent}' (长度: ${currentIndent.length})`);
 
     // 向上查找开大括号行
     let braceLine = -1;
@@ -1696,7 +1711,7 @@ function calculateProperIndent(
         }
     }
 
-    outputChannel.appendLine(`找到开大括号行 ${braceLine}: '${braceLine >= 0 ? document.lineAt(braceLine).text : ''}'`);
+    safeLog(outputChannel, `找到开大括号行 ${braceLine}: '${braceLine >= 0 ? document.lineAt(braceLine).text : ''}'`);
 
     // 获取基础缩进
     let baseIndent = '';
@@ -1706,7 +1721,7 @@ function calculateProperIndent(
         baseIndent = indentMatch ? indentMatch[1] : '';
     }
 
-    outputChannel.appendLine(`基础缩进: '${baseIndent}' (长度: ${baseIndent.length})`);
+    safeLog(outputChannel, `基础缩进: '${baseIndent}' (长度: ${baseIndent.length})`);
 
     // 分析缩进类型
     const useTabs = currentIndent.includes('\t');
@@ -1722,8 +1737,8 @@ function calculateProperIndent(
         fieldIndent = baseIndent + ' '.repeat(indentSize);
     }
 
-    outputChannel.appendLine(`使用${useTabs ? 'tab' : '空格'}缩进`);
-    outputChannel.appendLine(`使用的字段缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
+    safeLog(outputChannel, `使用${useTabs ? 'tab' : '空格'}缩进`);
+    safeLog(outputChannel, `使用的字段缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
 
     return { baseIndent, fieldIndent };
 }
@@ -1737,7 +1752,7 @@ function analyzeDirectFieldIndent(
     outputChannel: vscode.OutputChannel
 ): { baseIndent: string, fieldIndent: string } | null {
 
-    outputChannel.appendLine('尝试直接分析字段缩进');
+    safeLog(outputChannel, '尝试直接分析字段缩进');
 
     // 向上和向下查找最近的字段行
     const searchRange = 10; // 搜索范围
@@ -1764,7 +1779,7 @@ function analyzeDirectFieldIndent(
         }
     }
 
-    outputChannel.appendLine('直接分析未找到有效缩进');
+    safeLog(outputChannel, '直接分析未找到有效缩进');
     return null;
 }
 
@@ -1787,8 +1802,8 @@ function extractFieldIndentFromLine(
             const indentMatch = lineText.match(/^(\s*)/);
             const fieldIndent = indentMatch ? indentMatch[1] : '';
 
-            outputChannel.appendLine(`在行 ${lineNum} 找到字段: '${lineText.trim()}'`);
-            outputChannel.appendLine(`提取的缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
+            safeLog(outputChannel, `在行 ${lineNum} 找到字段: '${lineText.trim()}'`);
+            safeLog(outputChannel, `提取的缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
 
             // 计算基础缩进（通常是字段缩进减去一个tab或若干空格）
             let baseIndent = '';
@@ -1871,21 +1886,21 @@ async function getStructFieldDefinitionOrder(
     document: vscode.TextDocument,
     outputChannel: vscode.OutputChannel
 ): Promise<Array<{ name: string, type: string }>> {
-    outputChannel.appendLine(`开始获取结构体 ${structName} 的定义顺序`);
+    safeLog(outputChannel, `开始获取结构体 ${structName} 的定义顺序`);
 
     try {
         // 解析结构体名称，支持包名
         const { pkgName, structName: structNameOnly } = parseFullStructName(structName);
-        outputChannel.appendLine(`解析结构体名称: 包名=${pkgName}, 结构体名=${structNameOnly}`);
+        safeLog(outputChannel, `解析结构体名称: 包名=${pkgName}, 结构体名=${structNameOnly}`);
 
         // 如果是包名.结构体名的格式，需要在对应的包中查找
         if (pkgName) {
             // 查找工作区中匹配包名的文件
             const searchPattern = `**/${pkgName}/**/*.go`;
-            outputChannel.appendLine(`搜索模式: ${searchPattern}`);
+            safeLog(outputChannel, `搜索模式: ${searchPattern}`);
 
             const goFiles = await vscode.workspace.findFiles(searchPattern, null, 50);
-            outputChannel.appendLine(`找到 ${goFiles.length} 个相关文件`);
+            safeLog(outputChannel, `找到 ${goFiles.length} 个相关文件`);
 
             for (const file of goFiles) {
                 try {
@@ -1897,11 +1912,11 @@ async function getStructFieldDefinitionOrder(
                     const match = structRegex.exec(fileText);
 
                     if (match) {
-                        outputChannel.appendLine(`在文件 ${file.fsPath} 中找到结构体定义: ${structNameOnly}`);
+                        safeLog(outputChannel, `在文件 ${file.fsPath} 中找到结构体定义: ${structNameOnly}`);
                         return parseStructFieldsFromDefinition(match[1], outputChannel);
                     }
                 } catch (error) {
-                    outputChannel.appendLine(`搜索文件 ${file.fsPath} 时出错: ${error}`);
+                    safeLog(outputChannel, `搜索文件 ${file.fsPath} 时出错: ${error}`);
                 }
             }
         } else {
@@ -1911,7 +1926,7 @@ async function getStructFieldDefinitionOrder(
             let match = structRegex.exec(currentFileText);
 
             if (match) {
-                outputChannel.appendLine(`在当前文件中找到结构体定义: ${structNameOnly}`);
+                safeLog(outputChannel, `在当前文件中找到结构体定义: ${structNameOnly}`);
                 return parseStructFieldsFromDefinition(match[1], outputChannel);
             }
 
@@ -1928,20 +1943,20 @@ async function getStructFieldDefinitionOrder(
 
                     const match = structRegex.exec(fileText);
                     if (match) {
-                        outputChannel.appendLine(`在文件 ${file.fsPath} 中找到结构体定义: ${structNameOnly}`);
+                        safeLog(outputChannel, `在文件 ${file.fsPath} 中找到结构体定义: ${structNameOnly}`);
                         return parseStructFieldsFromDefinition(match[1], outputChannel);
                     }
                 } catch (error) {
-                    outputChannel.appendLine(`搜索文件 ${file.fsPath} 时出错: ${error}`);
+                    safeLog(outputChannel, `搜索文件 ${file.fsPath} 时出错: ${error}`);
                 }
             }
         }
 
-        outputChannel.appendLine(`未找到结构体 ${structName} 的定义`);
+        safeLog(outputChannel, `未找到结构体 ${structName} 的定义`);
         return [];
 
     } catch (error) {
-        outputChannel.appendLine(`获取结构体定义时出错: ${error}`);
+        safeLog(outputChannel, `获取结构体定义时出错: ${error}`);
         return [];
     }
 }
@@ -1962,7 +1977,7 @@ function parseStructFieldsFromDefinition(
         .replace(/\/\*[\s\S]*?\*\//g, '') // 移除块注释
         .trim();
 
-    outputChannel.appendLine(`解析结构体字段文本:\n${cleanText}`);
+    safeLog(outputChannel, `解析结构体字段文本:\n${cleanText}`);
 
     // 按行分割并解析每个字段
     const lines = cleanText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
@@ -1996,13 +2011,13 @@ function parseStructFieldsFromDefinition(
 
             // 过滤掉不可访问的字段
             if (inaccessibleFields.has(fieldName)) {
-                outputChannel.appendLine(`跳过不可访问字段: ${fieldName} (类型: ${fieldType})`);
+                safeLog(outputChannel, `跳过不可访问字段: ${fieldName} (类型: ${fieldType})`);
                 continue;
             }
 
             // 过滤掉以小写字母开头的私有字段
             if (fieldName[0] === fieldName[0].toLowerCase()) {
-                outputChannel.appendLine(`跳过私有字段: ${fieldName} (类型: ${fieldType})`);
+                safeLog(outputChannel, `跳过私有字段: ${fieldName} (类型: ${fieldType})`);
                 continue;
             }
 
@@ -2011,11 +2026,11 @@ function parseStructFieldsFromDefinition(
                 type: fieldType
             });
 
-            outputChannel.appendLine(`解析到字段: ${fieldName} (类型: ${fieldType})`);
+            safeLog(outputChannel, `解析到字段: ${fieldName} (类型: ${fieldType})`);
         }
     }
 
-    outputChannel.appendLine(`总共解析到 ${fields.length} 个可访问字段，顺序: [${fields.map(f => f.name).join(', ')}]`);
+    safeLog(outputChannel, `总共解析到 ${fields.length} 个可访问字段，顺序: [${fields.map(f => f.name).join(', ')}]`);
     return fields;
 }
 
@@ -2024,7 +2039,7 @@ function analyzeExistingIndent(
     position: vscode.Position,
     outputChannel: vscode.OutputChannel
 ): { baseIndent: string, fieldIndent: string } {
-    outputChannel.appendLine(`开始分析现有缩进，当前位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `开始分析现有缩进，当前位置: ${position.line}:${position.character}`);
 
     // 获取当前行和周围几行的文本
     const lines: string[] = [];
@@ -2034,9 +2049,9 @@ function analyzeExistingIndent(
         }
     }
 
-    outputChannel.appendLine('分析的行:');
+    safeLog(outputChannel, '分析的行:');
     lines.forEach((line, index) => {
-        outputChannel.appendLine(`行 ${index}: '${line}'`);
+        safeLog(outputChannel, `行 ${index}: '${line}'`);
     });
 
     // 查找左大括号行
@@ -2051,14 +2066,14 @@ function analyzeExistingIndent(
     }
 
     if (braceLineIndex === -1) {
-        outputChannel.appendLine('未找到左大括号行，使用默认缩进');
+        safeLog(outputChannel, '未找到左大括号行，使用默认缩进');
         return { baseIndent: '', fieldIndent: '\t' };
     }
 
     // 提取左大括号行的缩进
     const braceIndentMatch = braceLineText.match(/^(\s*)/);
     const baseIndent = braceIndentMatch ? braceIndentMatch[1] : '';
-    outputChannel.appendLine(`左大括号行缩进: '${baseIndent}' (长度: ${baseIndent.length})`);
+    safeLog(outputChannel, `左大括号行缩进: '${baseIndent}' (长度: ${baseIndent.length})`);
 
     // 查找字段行
     let fieldIndent = '';
@@ -2068,7 +2083,7 @@ function analyzeExistingIndent(
             const fieldIndentMatch = line.match(/^(\s*)/);
             if (fieldIndentMatch) {
                 fieldIndent = fieldIndentMatch[1];
-                outputChannel.appendLine(`找到字段行缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
+                safeLog(outputChannel, `找到字段行缩进: '${fieldIndent}' (长度: ${fieldIndent.length})`);
                 break;
             }
         }
@@ -2085,7 +2100,7 @@ function analyzeExistingIndent(
             const indentSize = spaceCount % 4 === 0 ? 4 : 2;
             fieldIndent = baseIndent + ' '.repeat(indentSize);
         }
-        outputChannel.appendLine(`使用计算的字段缩进: '${fieldIndent}'`);
+        safeLog(outputChannel, `使用计算的字段缩进: '${fieldIndent}'`);
     }
 
     return {
@@ -2099,18 +2114,18 @@ function analyzeIndentFromContext(
     position: vscode.Position,
     outputChannel: vscode.OutputChannel
 ): { baseIndent: string, fieldIndent: string, useTabs: boolean } {
-    outputChannel.appendLine(`开始分析上下文缩进，当前位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `开始分析上下文缩进，当前位置: ${position.line}:${position.character}`);
 
     // 向上查找非空行
     let currentLine = position.line;
     while (currentLine >= 0) {
         const lineText = document.lineAt(currentLine).text;
         if (lineText.trim() !== '') {
-            outputChannel.appendLine(`找到非空行 ${currentLine}: '${lineText}'`);
+            safeLog(outputChannel, `找到非空行 ${currentLine}: '${lineText}'`);
 
             // 检查是否是变量初始化
             if (lineText.match(/^\s*[\w\.]+\s*(?::=|=|:)\s*(?:&?[\w\.]+|\[\]|map\[string\])/)) {
-                outputChannel.appendLine('检测到变量初始化行');
+                safeLog(outputChannel, '检测到变量初始化行');
                 const indentMatch = lineText.match(/^(\s*)/);
                 const baseIndent = indentMatch ? indentMatch[1] : '';
 
@@ -2127,14 +2142,14 @@ function analyzeIndentFromContext(
                     fieldIndent = baseIndent + ' '.repeat(indentSize);
                 }
 
-                outputChannel.appendLine(`变量初始化行缩进: '${baseIndent}' (使用${useTabs ? 'tab' : '空格'})`);
-                outputChannel.appendLine(`计算的字段缩进: '${fieldIndent}'`);
+                safeLog(outputChannel, `变量初始化行缩进: '${baseIndent}' (使用${useTabs ? 'tab' : '空格'})`);
+                safeLog(outputChannel, `计算的字段缩进: '${fieldIndent}'`);
                 return { baseIndent, fieldIndent, useTabs };
             }
 
             // 检查是否是字段行
             if (lineText.match(/^\s*\w+\s*:/)) {
-                outputChannel.appendLine('检测到字段行');
+                safeLog(outputChannel, '检测到字段行');
                 const indentMatch = lineText.match(/^(\s*)/);
                 const fieldIndent = indentMatch ? indentMatch[1] : '';
                 const useTabs = fieldIndent.includes('\t');
@@ -2150,8 +2165,8 @@ function analyzeIndentFromContext(
                     }
                 }
 
-                outputChannel.appendLine(`字段行缩进: '${fieldIndent}' (使用${useTabs ? 'tab' : '空格'})`);
-                outputChannel.appendLine(`基础缩进: '${baseIndent}'`);
+                safeLog(outputChannel, `字段行缩进: '${fieldIndent}' (使用${useTabs ? 'tab' : '空格'})`);
+                safeLog(outputChannel, `基础缩进: '${baseIndent}'`);
                 return { baseIndent, fieldIndent, useTabs };
             }
         }
@@ -2159,7 +2174,7 @@ function analyzeIndentFromContext(
     }
 
     // 如果没有找到合适的行，使用默认缩进
-    outputChannel.appendLine('未找到合适的行，使用默认缩进');
+    safeLog(outputChannel, '未找到合适的行，使用默认缩进');
     return { baseIndent: '', fieldIndent: '\t', useTabs: true };
 }
 
@@ -2175,14 +2190,14 @@ function analyzeIndentInfo(
     position: vscode.Position,
     outputChannel: vscode.OutputChannel
 ): IndentInfo {
-    outputChannel.appendLine(`开始分析缩进信息，当前位置: ${position.line}:${position.character}`);
+    safeLog(outputChannel, `开始分析缩进信息，当前位置: ${position.line}:${position.character}`);
 
     // 向上查找非空行
     let currentLine = position.line;
     while (currentLine >= 0) {
         const lineText = document.lineAt(currentLine).text;
         if (lineText.trim() !== '') {
-            outputChannel.appendLine(`找到非空行 ${currentLine}: '${lineText}'`);
+            safeLog(outputChannel, `找到非空行 ${currentLine}: '${lineText}'`);
 
             // 获取缩进
             const indentMatch = lineText.match(/^(\s*)/);
@@ -2195,16 +2210,16 @@ function analyzeIndentInfo(
             if (useTabs) {
                 // 计算 tab 数量
                 indentSize = (indent.match(/\t/g) || []).length;
-                outputChannel.appendLine(`检测到 tab 缩进，数量: ${indentSize}`);
+                safeLog(outputChannel, `检测到 tab 缩进，数量: ${indentSize}`);
             } else {
                 // 计算空格数量
                 indentSize = indent.length;
-                outputChannel.appendLine(`检测到空格缩进，数量: ${indentSize}`);
+                safeLog(outputChannel, `检测到空格缩进，数量: ${indentSize}`);
             }
 
             // 检查是否是变量初始化
             if (lineText.match(/^\s*[\w\.]+\s*(?::=|=|:)\s*(?:&?[\w\.]+|\[\]|map\[string\])/)) {
-                outputChannel.appendLine('检测到变量初始化行');
+                safeLog(outputChannel, '检测到变量初始化行');
                 const baseIndent = indent;
                 let fieldIndent: string;
 
@@ -2224,7 +2239,7 @@ function analyzeIndentInfo(
 
             // 检查是否是字段行
             if (lineText.match(/^\s*\w+\s*:/)) {
-                outputChannel.appendLine('检测到字段行');
+                safeLog(outputChannel, '检测到字段行');
                 const fieldIndent = indent;
 
                 // 向上查找变量初始化行来获取基础缩进
@@ -2250,7 +2265,7 @@ function analyzeIndentInfo(
     }
 
     // 如果没有找到合适的行，使用默认缩进
-    outputChannel.appendLine('未找到合适的行，使用默认缩进');
+    safeLog(outputChannel, '未找到合适的行，使用默认缩进');
     return {
         type: 'tab',
         size: 1,

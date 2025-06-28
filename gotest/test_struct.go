@@ -32,37 +32,32 @@ func TestStruct(t *testing.T) {
 	fmt.Println("=== 测试按结构体定义顺序自动填充 ===")
 
 	// 测试场景1：空结构体（应该按顺序填充所有字段：Name -> Age -> Address）
-	d1 := ddd{
-		Name:    "",
-		Age:     0,
-		Address: "",
-	}
+	d1 := ddd{}
 
 	// 测试场景2：部分字段已填写，顺序错乱（应该保留已有值，按顺序重新排列）
 	d2 := ddd{
 		Name:    "",
 		Age:     0,
-		Address: "beijing",
+		Address: "1111",
 	}
 
 	// 测试场景3：只有中间字段（应该保留已有值，填充缺失字段，按顺序排列）
 	d3 := ddd{
 		Name:    "",
-		Age:     25,
-		Address: "",
+		Age:     0,
+		Address: "1111",
 	}
 
 	// 测试场景4：字段顺序完全错乱（应该重新排序为：Name -> Age -> Address）
 	d4 := ddd{
 		Name:    "",
-		Age:     30,
+		Age:     0,
 		Address: "",
 	}
 
 	// 测试场景5：嵌套结构体中的有序填充
 	d5 := ddd1{
-		ID:  "",
-		Age: 30,
+		ID: "",
 		ddd2: &ddd2{
 			Name:    "",
 			Age:     0,
@@ -75,12 +70,12 @@ func TestStruct(t *testing.T) {
 		ddd{
 			Name:    "",
 			Age:     0,
-			Address: "array_item",
+			Address: "",
 		},
 		ddd{
 			Name:    "",
 			Age:     0,
-			Address: "",
+			Address: "11",
 		},
 	}
 

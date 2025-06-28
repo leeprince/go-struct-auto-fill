@@ -24,10 +24,26 @@ func TestPackage(t *testing.T) {
 	fmt.Println("userLocal:", userLocal)
 
 	userInfo := &user.User{
-		Id:       0,
-		Name:     "",
-		Email:    "",
-		IsActive: 0,
+		Id:        0,
+		Name:      "",
+		Email:     "",
+		IsActive:  0,
+		Phone:     "",
+		CreatedAt: 0,
+		UpdatedAt: 0,
+		AvatarUrl: "",
+		Gender:    0,
+		City:      "",
+		Province:  "",
+		Country:   "",
+		IsVip:     false,
+		LastLogin: 0,
+		Roles:     nil,
+		Nickname:  "",
+		Age:       0,
+		Bio:       "",
+		JobTitle:  "",
+		Company:   "",
 	}
 
 	fmt.Println("userInfo:", userInfo)

@@ -2,8 +2,8 @@
   "name": "go-struct-auto-fill",
   "displayName": "Go Struct Auto Fill",
   "description": "Automatically fill Go struct fields with default values",
-  "version": "1.3.2",
-  "icon": "images/logo.png",
+  "version": "1.3.3",
+  "icon": "assets/images/logo.png",
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -28,7 +28,18 @@
         "mac": "alt+enter",
         "when": "editorLangId == go"
       }
-    ]
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Go Struct Auto Fill",
+      "properties": {
+        "go-struct-auto-fill.enableLog": {
+          "type": "boolean",
+          "default": true,
+          "description": "在输出面板显示插件日志"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -46,7 +57,7 @@
     "productivity",
     "development"
   ],
-  "author": "prince",
+  "author": "皇子",
   "license": "MIT",
   "devDependencies": {
     "@types/vscode": "^1.60.0",

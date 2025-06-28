@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>科技风格流程图</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700&family=Share+Tech+Mono&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c;
+            /* 深色背景 */
+            color: #e2e8f0;
+            /* 浅色文字 */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .container {
+            background-color: #2d3748;
+            /* 略浅的深色背景 */
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.5);
+            /* 较深的阴影 */
+            width: 100%;
+            max-width: 900px;
+            border: 1px solid #4a5568;
+            /* 轻微边框 */
+        }
+
+        h1 {
+            color: #63b3ed;
+            /* 蓝色标题 */
+            text-shadow: 0 0 8px rgba(99, 179, 237, 0.7);
+            /* 标题发光效果 */
+            font-family: 'Share Tech Mono', monospace;
+            /* 科技感字体 */
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        /* Mermaid 流程图的自定义样式 */
+        .mermaid {
+            font-family: 'Share Tech Mono', monospace;
+            /* 应用到流程图内的文本 */
+            text-align: center;
+            /* 确保图表居中 */
+            padding: 20px;
+            background-color: #1a202c;
+            /* 图表区域的深色背景 */
+            border-radius: 8px;
+            border: 1px solid #4a5568;
+        }
+
+        .mermaid svg {
+            max-width: 100%;
+            /* 确保SVG响应式 */
+            height: auto;
+            /* 保持高宽比 */
+        }
+
+        /* 节点样式 */
+        .node rect,
+        .node circle,
+        .node polygon {
+            fill: #4a5568 !important;
+            /* 节点背景色 */
+            stroke: #63b3ed !important;
+            /* 节点边框颜色 */
+            stroke-width: 2px !important;
+            rx: 8px;
+            /* 圆角 */
+            ry: 8px;
+            transition: fill 0.3s ease, stroke 0.3s ease;
+        }
+
+        /* 节点文本样式 */
+        .node text {
+            fill: #a0aec0 !important;
+            /* 节点文本颜色 */
+            font-size: 14px !important;
+            font-weight: bold;
+            text-shadow: 0 0 3px rgba(160, 174, 192, 0.5);
+            /* 文本发光 */
+        }
+
+        /* 箭头和线条样式 */
+        .edgePath .path {
+            stroke: #68d391 !important;
+            /* 线条颜色 (绿色) */
+            stroke-width: 2px !important;
+            fill: none !important;
+            marker-end: url(#arrowhead) !important;
+            /* 确保箭头生效 */
+            transition: stroke 0.3s ease;
+        }
+
+        /* 箭头尖端样式 */
+        .marker {
+            fill: #68d391 !important;
+            /* 箭头尖端颜色 */
+        }
+
+        /* 核心逻辑高亮样式 */
+        .core rect {
+            fill: #48bb78 !important;
+            /* 核心节点背景色 (更亮的绿色) */
+            stroke: #38a169 !important;
+            /* 核心节点边框色 */
+            stroke-width: 3px !important;
+            box-shadow: 0 0 10px rgba(72, 187, 120, 0.8) !important;
+            /* 核心节点发光效果 */
+        }
+
+        .core text {
+            fill: #1a202c !important;
+            /* 核心节点文本颜色 */
+            text-shadow: none !important;
+            /* 移除发光，保持清晰 */
+        }
+
+        /* 链接文本样式 */
+        .edgeLabel text {
+            fill: #90cdf4 !important;
+            /* 链接文本颜色 */
+            font-size: 12px !important;
+            font-weight: normal;
+        }
+
+        /* 状态图特有样式，可能不适用于流程图，但以防万一 */
+        .state rect {
+            fill: #4a5568 !important;
+            stroke: #63b3ed !important;
+        }
+
+        .state text {
+            fill: #a0aec0 !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Go Struct Auto Fill 插件流程图</h1>
+        <div id="mermaid-chart" class="mermaid">
+            flowchart TD
+            A["VSCode 编辑器"] -->|"用户触发插件快捷键 Alt+Enter 或命令行触发"| B["Go Struct Auto Fill 插件"]
+            B --> C["定位光标位置"]
+            C --> D["分析结构体上下文"]
+            D --> E["查找结构体声明"]
+            E --> F["获取补全项vscode.executeCompletionItemProvider"]
+            F --> G["解析已有字段"]
+            F --> H["获取结构体字段顺序"]
+            G --> I["生成有序字段代码"]
+            H --> I
+            I --> J["计算结构体内容范围"]
+            J --> K["替换或插入字段到文档"]
+            K --> L["格式化与缩进代码"]
+            L --> M["信息/日志/通知输出"]
+            %% 核心逻辑高亮
+            classDef core fill:#bfb,stroke:#333,stroke-width:2px;
+            class F,G,H,I,J,K,L core;
+        </div>
+    </div>
+
+    <!-- 引入 Mermaid JS 库 -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>
+        // 配置 Mermaid
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'base', // 使用基础主题，然后通过 CSS 完全自定义
+            themeVariables: {
+                // 确保自定义的CSS不受主题变量影响
+                lineColor: '#68d391',
+                primaryColor: '#4a5568',
+                primaryTextColor: '#a0aec0',
+                primaryBorderColor: '#63b3ed',
+                nodeBorder: '#63b3ed',
+                nodeTextColor: '#a0aec0',
+                clusterBkg: '#2d3748',
+                clusterBorder: '#4a5568',
+                edgeLabelBackground: '#2d3748'
+            },
+            fontFamily: 'Share Tech Mono, monospace'
+        });
+
+        // 确保在DOM加载完成后渲染Mermaid图
+        document.addEventListener('DOMContentLoaded', function () {
+            // 如果 Mermaid 配置了 startOnLoad: true，它会在 DOMContentLoaded 后自动查找并渲染 .mermaid 元素。
+            // 如果需要手动渲染，可以使用 mermaid.render()
+            // 例如：
+            // const element = document.getElementById('mermaid-chart');
+            // const graphDefinition = element.textContent; // 获取mermaid代码
+            // mermaid.render('graphDiv', graphDefinition, (svgCode, bindFunctions) => {
+            //     element.innerHTML = svgCode;
+            // });
+        });
+    </script>
+</body>
+
+</html>
