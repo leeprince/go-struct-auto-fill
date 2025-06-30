@@ -1,0 +1,38 @@
+name: Build VSCode Extension
+
+on:
+  push:
+    branches: ["master"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: "npm"
+
+      - name: 安装 npm 依赖
+        run: npm install
+
+      - name: 安装 VSCE 工具
+        run: npm install -g @vscode/vsce
+
+      - name: 构建插件（调用 make build）
+        run: make build
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v3
+        with:
+          name: vscode-extension
+          path: "*.vsix"

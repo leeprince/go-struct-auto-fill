@@ -276,7 +276,7 @@ processStruct(ddd{
 
 ## Technical Architecture Diagram
 
-The following diagram illustrates the core technical architecture of the Go Struct Auto Fill extension, featuring a zero-temp-file, fully in-document smart completion pipeline:
+### flow chart
 
 ```mermaid
  flowchart TD

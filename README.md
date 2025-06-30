@@ -279,7 +279,7 @@ processStruct(ddd{
 
 ## 技术架构图
 
-下图展示了 Go Struct Auto Fill 插件"零临时文件、全流程在当前文档内智能补全"的核心技术架构：
+### 流程图
 
 ```mermaid
  flowchart TD
