@@ -19,14 +19,13 @@ Go Struct Auto Fill 是一个 Visual Studio Code 插件，用于自动填充 Go 
 
 ## 功能
 
-- **自动填充结构体字段**：根据结构体定义，自动生成并填充未初始化的字段。
+- **自动填充结构体字段**：根据结构体定义，自动生成并填充未初始化的字段，并保留已初始化的字段和值。
 - **智能光标定位**：支持在结构体大括号内**任何位置**触发自动填充，无需精确定位到特定行。
 - **支持嵌套结构体**：能够正确处理嵌套结构体，并填充其字段。
 - **多场景支持**：支持数组、map、append函数、函数参数等多种Go结构体初始化场景。
 - **智能字段检查**：确保只在当前结构体的范围内检查字段是否已存在，避免跨结构体的错误判断。
-- **智能缩进**：根据不同的初始化场景自动调整代码缩进格式。
 - **详细的日志输出**：提供详细的日志信息，帮助开发者诊断问题。
-- **无临时文件** ✨：**完全不创建任何临时文件**，直接在当前文档中获取补全信息，保持工作区清洁。
+- **无临时文件** ：**完全不创建任何临时文件**，直接在当前文档中获取补全信息，保持工作区清洁。
 - **包名结构体支持**：完美支持包名形式的结构体（如 `user.User`、`pb.Message` 等）。
 - **字段顺序严格按定义排列**：严格按照结构体定义顺序填充和重排所有字段。
 
@@ -40,6 +39,16 @@ Go Struct Auto Fill 是一个 Visual Studio Code 插件，用于自动填充 Go 
 2. 进入扩展面板（Ctrl+Shift+X）。
 3. 搜索 `Go Struct Auto Fill` 并点击安装。
 
+### 从 Github Releases中下载并手动安装
+
+1. 访问：`https://github.com/leeprince/go-struct-auto-fill/releases`
+2. 下载指定版本.vsix文件，如：go-struct-auto-fill-x.x.x.vsix
+3. 到 VSCode 中手动导入.vsix文件安装。
+   - 打开 Visual Studio Code。
+   - 进入扩展面板（Ctrl+Shift+X）。
+   - 点击右上角的 `...` 按钮，选择 `从 VSIX 安装...`。
+   - 选择生成的 `.vsix` 文件进行安装。
+
 ### 从源码构建
 
 1. **克隆项目**：
@@ -49,10 +58,10 @@ git clone https://github.com/leeprince/go-struct-auto-fill.git
 cd go-struct-auto-fill
 ```
 
-#### 方法一：使用Makefile（一键构建）
+2. **使用Makefile构建（一键构建）**
 
 ```bash
-# 一键构建插件包
+# 一键构建插件包，Makefile 默认为 make build 命令
 make build
 
 # 或者构建并直接安装到VSCode
@@ -62,23 +71,16 @@ make install-extension
 make help
 ```
 
-#### 方法二：手动构建
+> make build 命令包含如下步骤：
 
-2. **安装依赖**：
-
-```bash
+```
+# 安装依赖
 npm install
-```
 
-3. **编译插件**：
-
-```bash
+# 编译插件
 npm run compile
-```
 
-4. **打包插件**：
-
-```bash
+# 打包插件
 vsce package
 ```
 
@@ -98,11 +100,7 @@ vsce package
 >
 > 如果命令发布失败，还可以通过**手动上传**，详情参考官方文档。
 
-5. **安装插件**：
-   - 打开 Visual Studio Code。
-   - 进入扩展面板（Ctrl+Shift+X）。
-   - 点击右上角的 `...` 按钮，选择 `从 VSIX 安装...`。
-   - 选择生成的 `.vsix` 文件进行安装。
+3. **安装插件**：参考上面的导入.vsix文件安装
 
 ## 使用
 
@@ -189,7 +187,7 @@ var d3 = ddd{
 }
 ```
 
-#### 2. 包名结构体初始化 🆕
+#### 2. 包名结构体初始化
 
 ```go
 // 包名结构体（如 protobuf、其他包的结构体）
@@ -228,7 +226,7 @@ ln := ListNode{
 }
 ```
 
-#### 4. 数组初始化 🆕
+#### 4. 数组初始化
 
 ```go
 // 数组字面量
@@ -245,7 +243,7 @@ dList2 := []ddd{
 }
 ```
 
-#### 5. Map初始化 🆕
+#### 5. Map初始化
 
 ```go
 // 简单map
@@ -261,20 +259,11 @@ complexMap := map[string][]ddd{
 }
 ```
 
-#### 6. append函数 🆕
+#### 6. append函数
 
 ```go
 var dSlice []ddd
 dSlice = append(dSlice, ddd{}) // 光标放在结构体大括号内任意位置，按 Alt+Enter 自动填充
-```
-
-#### 7. 函数参数 🆕
-
-```go
-// 函数调用参数
-processStruct(ddd{
-    // 光标放在结构体大括号内任意位置，按 Alt+Enter 自动填充
-})
 ```
 
 ## 技术架构图
@@ -302,6 +291,10 @@ processStruct(ddd{
 ```
 
 > 所有补全、排序、内容生成、插入、格式化等操作全部在当前文档内完成，绝不创建任何临时文件。
+
+## todo
+
+- **智能缩进**：根据不同的初始化场景自动调整代码缩进格式。
 
 ## 反馈与贡献
 

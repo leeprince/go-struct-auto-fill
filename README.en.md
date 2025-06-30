@@ -21,7 +21,6 @@ Go Struct Auto Fill is a Visual Studio Code extension for automatically filling 
 - **Nested struct support**: Correctly handle and fill nested struct fields.
 - **Multi-scenario support**: Supports arrays, maps, append functions, function parameters, and more Go struct initialization scenarios.
 - **Smart field checking**: Ensures only fields within the current struct are checked, avoiding cross-struct errors.
-- **Smart indentation**: Automatically adjusts code indentation for different initialization scenarios.
 - **Detailed logging**: Provides detailed log information to help developers diagnose issues.
 - **No temp files ✨**: **Never creates any temp files**, directly uses completion info from the current document, keeping your workspace clean.
 - **Package struct support**: Perfectly supports package-style structs (e.g. `user.User`, `pb.Message`).
@@ -299,6 +298,10 @@ processStruct(ddd{
 ```
 
 > All completion, sorting, content generation, insertion, and formatting are performed directly in the current document, with absolutely no temp files created.
+
+## todo
+
+- **Smart indentation**: Automatically adjusts code indentation for different initialization scenarios.
 
 ## Feedback & Contribution
 
