@@ -13,13 +13,12 @@ type ddd struct {
 
 type ddd1 struct {
 	ID   string `json:"id,omitempty"`
-	Age  int    `json:"age,omitempty"`
 	ddd2 *ddd2  `json:"ddd2,omitempty"`
+	Age  int    `json:"age,omitempty"`
 }
 
 type ddd2 struct {
 	Name    string `json:"name,omitempty"`
-	Age     int    `json:"age,omitempty"`
 	Address string `json:"address,omitempty"`
 }
 
@@ -57,12 +56,9 @@ func TestStruct(t *testing.T) {
 
 	// 测试场景5：嵌套结构体中的有序填充
 	d5 := ddd1{
-		ID: "",
-		ddd2: &ddd2{
-			Name:    "",
-			Age:     0,
-			Address: "ddd2 Address",
-		},
+		ID:   "",
+		ddd2: nil,
+		Age:  0,
 	}
 
 	// 测试场景6：数组中的有序填充

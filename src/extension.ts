@@ -169,7 +169,8 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             // 解析当前结构体中已有的字段
-            const existingFields = parseExistingStructFields(document, position, outputChannel);
+            const structBraceRange = findStructBraceRangeByStructName(document, structName, outputChannel);
+            const existingFields = parseExistingStructFields(document, position, outputChannel, structBraceRange || undefined);
 
             // 使用新的有序字段生成逻辑
             const { code: orderedFieldsCode, addedFields } = await generateOrderedFieldsCode(
@@ -246,25 +247,25 @@ function identifyStructInitialization(
     position: vscode.Position,
     outputChannel: vscode.OutputChannel
 ): StructMatchResult | null {
-
     const currentLine = document.lineAt(position.line);
     const currentLineText = currentLine.text;
-
     safeLog(outputChannel, `开始识别结构体初始化，当前行: ${currentLineText}`);
 
-    // 首先尝试简化逻辑：直接从当前光标位置向上查找结构体声明
+    // 优先递归查找最外层结构体
+    const outerStruct = findOutermostStructDeclaration(document, position, outputChannel);
+    if (outerStruct) {
+        return outerStruct;
+    }
+    // 其次再用原有的简化查找和上下文分析
     const structResult = findStructDeclarationSimple(document, position, outputChannel);
     if (structResult) {
         return structResult;
     }
-
-    // 如果简化查找失败，使用更强大的上下文分析作为备选方案
     safeLog(outputChannel, '简化查找失败，尝试使用上下文分析');
     const contextResult = analyzeStructContext(document, position, outputChannel);
     if (contextResult) {
         return contextResult;
     }
-
     return null;
 }
 
@@ -1453,53 +1454,43 @@ function findStructBraceRange(
 function parseExistingStructFields(
     document: vscode.TextDocument,
     position: vscode.Position,
-    outputChannel: vscode.OutputChannel
+    outputChannel: vscode.OutputChannel,
+    braceRangeOverride?: { openBraceLine: number, closeBraceLine: number }
 ): Map<string, string> {
     const fields = new Map<string, string>();
-
     safeLog(outputChannel, `开始解析已存在字段，光标位置: ${position.line}:${position.character}`);
-
-    // 使用统一的大括号范围查找函数
-    const braceRange = findStructBraceRange(document, position, outputChannel);
+    // 使用传入的 braceRangeOverride 或默认查找
+    let braceRange = braceRangeOverride || findStructBraceRange(document, position, outputChannel);
     if (!braceRange) {
         safeLog(outputChannel, '无法找到结构体大括号范围，无法解析字段');
         return fields;
     }
-
     const { openBraceLine, closeBraceLine } = braceRange;
-
     // 解析开大括号和闭大括号之间的字段
     for (let lineNum = openBraceLine; lineNum <= closeBraceLine; lineNum++) {
         const lineText = document.lineAt(lineNum).text;
-
         // 跳过包含大括号但不是字段的行
         if (lineText.includes('{') || lineText.includes('}')) {
             continue;
         }
-
         // 跳过注释行和空行
         const trimmed = lineText.trim();
         if (trimmed === '' || trimmed.startsWith('//')) {
             continue;
         }
-
-        // 匹配字段行：以大写字母开头的字段名，后跟冒号
-        // 格式：FieldName: value,
-        const fieldMatch = trimmed.match(/^([A-Z][a-zA-Z0-9]*)\s*:\s*(.+?)(?:,\s*)?$/);
+        // 匹配字段行：以大写字母或小写字母开头的字段名，后跟冒号
+        const fieldMatch = trimmed.match(/^([A-Za-z_][a-zA-Z0-9_]*)\s*:\s*(.+?)(?:,\s*)?$/);
         if (fieldMatch) {
             const fieldName = fieldMatch[1];
             let fieldValue = fieldMatch[2].trim();
-
             // 移除末尾的逗号
             if (fieldValue.endsWith(',')) {
                 fieldValue = fieldValue.slice(0, -1).trim();
             }
-
             fields.set(fieldName, fieldValue);
             safeLog(outputChannel, `解析到字段: ${fieldName} = ${fieldValue}`);
         }
     }
-
     safeLog(outputChannel, `总共解析到 ${fields.size} 个已存在字段: [${Array.from(fields.keys()).join(', ')}]`);
     return fields;
 }
@@ -1568,38 +1559,41 @@ async function generateOrderedFieldsCode(
     if (!editor) {
         return { code: '', addedFields: [] };
     }
-
     const document = editor.document;
     const position = editor.selection.active;
-
     // 首先尝试从结构体定义获取字段顺序
     let fieldDefinitions = await getStructFieldDefinitionOrder(structName, document, outputChannel);
     const addedFields: string[] = [];
-
     // 如果没有找到结构体定义，使用补全项顺序
     if (fieldDefinitions.length === 0) {
         safeLog(outputChannel, '没有找到结构体字段定义顺序，尝试使用补全项顺序');
-        const fieldOrder = getStructFieldOrder(completionItems, outputChannel);
-
+        // 只保留 label 与 structName 匹配的补全项
+        const filteredItems = completionItems.items.filter(item => {
+            if (item.kind !== vscode.CompletionItemKind.Field) return false;
+            // 过滤嵌套字段（带点号）
+            const fieldName = typeof item.label === 'string' ? item.label : item.label.label;
+            if (fieldName.includes('.')) return false;
+            // 过滤掉不是当前结构体的字段（通过 detail 类型中包含 structName 判断）
+            if (item.detail && !item.detail.includes(structName)) return false;
+            return true;
+        });
+        const fieldOrder = filteredItems.map(item => (typeof item.label === 'string' ? item.label : item.label.label));
         if (fieldOrder.length === 0) {
             safeLog(outputChannel, '补全项中也没有找到字段');
             return { code: '', addedFields: [] };
         }
-
         // 将补全项转换为字段定义格式
         fieldDefinitions = fieldOrder.map(name => {
-            const fieldItem = completionItems.items.find(item => {
+            const fieldItem = filteredItems.find(item => {
                 const itemLabel = typeof item.label === 'string' ? item.label : item.label.label;
                 return item.kind === vscode.CompletionItemKind.Field && itemLabel === name;
             });
-
             return {
                 name,
                 type: fieldItem?.detail || 'interface{}'
             };
         });
     }
-
     // 合并已存在字段和补全项中的字段，确保完整性
     const allAvailableFields = new Set<string>();
 
@@ -1913,21 +1907,26 @@ async function getStructFieldDefinitionOrder(
 
                     if (match) {
                         safeLog(outputChannel, `在文件 ${file.fsPath} 中找到结构体定义: ${structNameOnly}`);
-                        return parseStructFieldsFromDefinition(match[1], outputChannel);
+                        // 比较包名
+                        const currentPkg = getGoFilePackageName(document.getText());
+                        const defPkg = getGoFilePackageName(fileText);
+                        safeLog(outputChannel, `当前包名: ${currentPkg}, 定义包名: ${defPkg}`);
+                        const isSamePackage = !!(currentPkg && defPkg && currentPkg.trim().toLowerCase() === defPkg.trim().toLowerCase());
+                        return parseStructFieldsFromDefinition(match[1], outputChannel, isSamePackage);
                     }
                 } catch (error) {
                     safeLog(outputChannel, `搜索文件 ${file.fsPath} 时出错: ${error}`);
                 }
             }
         } else {
-            // 如果没有包名，在当前文件和工作区中查找
+            // 没有包名，肯定同包，保留所有字段
             const currentFileText = document.getText();
             const structRegex = new RegExp(`type\\s+${structNameOnly}\\s+struct\\s*{([^}]+)}`, 's');
             let match = structRegex.exec(currentFileText);
 
             if (match) {
                 safeLog(outputChannel, `在当前文件中找到结构体定义: ${structNameOnly}`);
-                return parseStructFieldsFromDefinition(match[1], outputChannel);
+                return parseStructFieldsFromDefinition(match[1], outputChannel, true);
             }
 
             // 在工作区的所有.go文件中查找
@@ -1944,7 +1943,8 @@ async function getStructFieldDefinitionOrder(
                     const match = structRegex.exec(fileText);
                     if (match) {
                         safeLog(outputChannel, `在文件 ${file.fsPath} 中找到结构体定义: ${structNameOnly}`);
-                        return parseStructFieldsFromDefinition(match[1], outputChannel);
+                        // 没有包名，肯定同包
+                        return parseStructFieldsFromDefinition(match[1], outputChannel, true);
                     }
                 } catch (error) {
                     safeLog(outputChannel, `搜索文件 ${file.fsPath} 时出错: ${error}`);
@@ -1967,7 +1967,8 @@ async function getStructFieldDefinitionOrder(
  */
 function parseStructFieldsFromDefinition(
     fieldsText: string,
-    outputChannel: vscode.OutputChannel
+    outputChannel: vscode.OutputChannel,
+    isSamePackage: boolean
 ): Array<{ name: string, type: string }> {
     const fields: Array<{ name: string, type: string }> = [];
 
@@ -1998,11 +1999,6 @@ function parseStructFieldsFromDefinition(
 
     for (const line of lines) {
         // 匹配字段定义：FieldName Type `tags`
-        // 支持多种格式：
-        // 1. Name string `json:"name"`
-        // 2. Age int
-        // 3. Items []Item
-        // 4. Map map[string]int
         const fieldMatch = line.match(/^(\w+)\s+([^\s`]+)/);
 
         if (fieldMatch) {
@@ -2015,8 +2011,8 @@ function parseStructFieldsFromDefinition(
                 continue;
             }
 
-            // 过滤掉以小写字母开头的私有字段
-            if (fieldName[0] === fieldName[0].toLowerCase()) {
+            // 只在非同包时跳过私有字段
+            if (!isSamePackage && fieldName[0] === fieldName[0].toLowerCase()) {
                 safeLog(outputChannel, `跳过私有字段: ${fieldName} (类型: ${fieldType})`);
                 continue;
             }
@@ -2272,5 +2268,95 @@ function analyzeIndentInfo(
         baseIndent: '',
         fieldIndent: '\t'
     };
+}
+
+// 新增：获取 Go 文件 package 名的工具函数
+function getGoFilePackageName(fileText: string): string | null {
+    const match = fileText.match(/^\s*package\s+(\w+)/m);
+    return match ? match[1] : null;
+}
+
+// 新增：递归查找最外层包含光标的结构体声明
+function findOutermostStructDeclaration(
+    document: vscode.TextDocument,
+    position: vscode.Position,
+    outputChannel: vscode.OutputChannel
+): StructMatchResult | null {
+    // 记录所有大括号对的范围
+    const stack: Array<{ line: number, char: number }> = [];
+    const structRanges: Array<{ start: number, end: number, structName: string }> = [];
+    for (let lineNum = 0; lineNum < document.lineCount; lineNum++) {
+        const lineText = document.lineAt(lineNum).text;
+        for (let charPos = 0; charPos < lineText.length; charPos++) {
+            const char = lineText[charPos];
+            if (char === '{') {
+                // 尝试在 { 前面找结构体声明
+                const beforeBrace = lineText.substring(0, charPos);
+                const structPattern = /([\w\.]+)\s*$/;
+                const match = beforeBrace.match(structPattern);
+                stack.push({ line: lineNum, char: charPos });
+                if (match) {
+                    // 记录结构体名和起始行
+                    structRanges.push({ start: lineNum, end: -1, structName: match[1] });
+                }
+            } else if (char === '}') {
+                // 闭合最近的结构体
+                if (stack.length > 0) {
+                    const open = stack.pop();
+                    if (open) {
+                        // 找到最近未闭合的结构体范围
+                        for (let i = structRanges.length - 1; i >= 0; i--) {
+                            if (structRanges[i].end === -1 && structRanges[i].start === open.line) {
+                                structRanges[i].end = lineNum;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // 查找包含光标的最外层结构体
+    for (let i = 0; i < structRanges.length; i++) {
+        const { start, end, structName } = structRanges[i];
+        if (start <= position.line && end >= position.line) {
+            // 只返回第一个（最外层）
+            safeLog(outputChannel, `递归查找到最外层结构体: ${structName}, 范围: ${start}-${end}`);
+            return {
+                structName,
+                isNestedStruct: false,
+                matchType: 'variable',
+            };
+        }
+    }
+    return null;
+}
+
+// 新增：根据结构体名查找其大括号范围
+function findStructBraceRangeByStructName(
+    document: vscode.TextDocument,
+    structName: string,
+    outputChannel: vscode.OutputChannel
+): { openBraceLine: number, closeBraceLine: number } | null {
+    const structPattern = new RegExp(`${structName}\\s*{`);
+    for (let lineNum = 0; lineNum < document.lineCount; lineNum++) {
+        const lineText = document.lineAt(lineNum).text;
+        if (structPattern.test(lineText)) {
+            // 找到结构体声明行，向下找匹配的闭大括号
+            let braceCount = 0;
+            let openBraceLine = lineNum;
+            for (let i = lineNum; i < document.lineCount; i++) {
+                const text = document.lineAt(i).text;
+                for (let char of text) {
+                    if (char === '{') braceCount++;
+                    if (char === '}') braceCount--;
+                    if (braceCount === 0) {
+                        return { openBraceLine, closeBraceLine: i };
+                    }
+                }
+            }
+        }
+    }
+    return null;
 }
 
